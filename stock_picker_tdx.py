@@ -17,7 +17,7 @@
   export PG_PORT=5432
   export PG_USER=你的pg用户名
   export PG_PASSWORD=你的pg密码  # 可为空
-  export PG_DB=a_share
+  export PG_DB=horace_quant
   python stock_picker_tdx.py --rule rules/b1.tdx --rule-name b1
 
   # 指定选股日期（默认取数据库中的最新交易日）
@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import pandas as pd
 import psycopg2
 import psycopg2.extras
+import psycopg2.sql
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ def load_pg_config() -> PgConfig:
     port = int(os.getenv("PG_PORT", "5432"))
     user = os.getenv("PG_USER", getpass.getuser())
     password = os.getenv("PG_PASSWORD", "")
-    dbname = os.getenv("PG_DB", "a_share")
+    dbname = os.getenv("PG_DB", "horace_quant")
     return PgConfig(host=host, port=port, user=user, password=password, dbname=dbname)
 
 
@@ -69,25 +70,47 @@ def pg_connect(cfg: PgConfig):
     )
 
 
-def ensure_result_table(conn) -> None:
+def ensure_result_table(conn, table_name: str) -> None:
+    """
+    结果表按交易日分表：stock_pick_results_YYYYMMDD
+    只写入入选结果，不存 picked 字段。
+    """
+    if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", table_name):
+        raise ValueError(f"非法表名：{table_name}")
+
+    suffix = table_name.split("_")[-1] if "_" in table_name else "x"
+    idx_rule = f"idx_spr_{suffix}_rule"
+    idx_code = f"idx_spr_{suffix}_code"
+
     with conn.cursor() as cur:
         cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS stock_pick_results (
-              rule_name   TEXT NOT NULL,
-              trade_date  DATE NOT NULL,
-              code        CHAR(6) NOT NULL REFERENCES stock_basic(code),
-              name        TEXT NOT NULL,
-              exchange    CHAR(2) NOT NULL,
-              picked      BOOLEAN NOT NULL,
-              metrics     JSONB,
-              created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-              PRIMARY KEY (rule_name, trade_date, code)
-            );
-            """
+            psycopg2.sql.SQL(
+                """
+                CREATE TABLE IF NOT EXISTS {t} (
+                  rule_name   TEXT NOT NULL,
+                  trade_date  DATE NOT NULL,
+                  code        CHAR(6) NOT NULL REFERENCES stock_basic(code),
+                  name        TEXT NOT NULL,
+                  exchange    CHAR(2) NOT NULL,
+                  metrics     JSONB,
+                  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                  PRIMARY KEY (rule_name, code)
+                );
+                """
+            ).format(t=psycopg2.sql.Identifier(table_name))
         )
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_pick_results_trade_date ON stock_pick_results(trade_date);")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_pick_results_rule ON stock_pick_results(rule_name);")
+        cur.execute(
+            psycopg2.sql.SQL("CREATE INDEX IF NOT EXISTS {idx} ON {t}(rule_name);").format(
+                idx=psycopg2.sql.Identifier(idx_rule),
+                t=psycopg2.sql.Identifier(table_name),
+            )
+        )
+        cur.execute(
+            psycopg2.sql.SQL("CREATE INDEX IF NOT EXISTS {idx} ON {t}(code);").format(
+                idx=psycopg2.sql.Identifier(idx_code),
+                t=psycopg2.sql.Identifier(table_name),
+            )
+        )
     conn.commit()
 
 
@@ -229,10 +252,11 @@ def _as_bool_series(v: Value, index: pd.Index) -> pd.Series:
 
 
 class TdxContext:
-    def __init__(self, df: pd.DataFrame, code: str, exchange: str):
+    def __init__(self, df: pd.DataFrame, code: str, exchange: str, name: str):
         self.df = df
         self.code = code
         self.exchange = exchange.upper()
+        self.name = name
         self.index = df.index
 
         # 基础字段映射（兼容 C/CLOSE/HIGH/...）
@@ -321,6 +345,27 @@ class TdxContext:
         else:
             # 未覆盖的板块：默认 False
             flag = False
+        return pd.Series([flag] * len(self.index), index=self.index, dtype=bool)
+
+    def NAMELIKE(self, pattern: Value) -> pd.Series:
+        """
+        通达信 NAMELIKE：按股票名称做模式匹配。
+        这里做一个离线实现：
+          - pattern 不含 '*'：按“包含子串”判断（例如 'ST' in name）
+          - pattern 含 '*'：'*' 视为通配任意长度字符，转换成正则并做 search
+        """
+        if not isinstance(pattern, str):
+            raise TypeError("NAMELIKE 参数必须是字符串，如 NAMELIKE('ST') 或 NAMELIKE('S*ST')")
+        p = pattern.strip()
+        nm = (self.name or "").strip()
+        if p == "":
+            flag = False
+        elif "*" not in p:
+            flag = p in nm
+        else:
+            # 将 * 转成 .*
+            re_pat = re.escape(p).replace("\\*", ".*")
+            flag = re.search(re_pat, nm) is not None
         return pd.Series([flag] * len(self.index), index=self.index, dtype=bool)
 
 
@@ -476,6 +521,8 @@ class Parser:
             return self.ctx.HHV(args[0], args[1])
         if up == "INBLOCK":
             return self.ctx.INBLOCK(args[0])
+        if up == "NAMELIKE":
+            return self.ctx.NAMELIKE(args[0])
         raise KeyError(f"未支持的函数：{name}")
 
 
@@ -547,8 +594,86 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--adjust", type=str, default="", help='复权类型：""|qfq|hfq（需与入库时一致）')
     p.add_argument("--lookback-days", type=int, default=450, help="拉取历史窗口（天），至少需覆盖 MA114 等")
     p.add_argument("--limit", type=int, default=0, help="仅处理前 N 只股票（调试用）")
-    p.add_argument("--only-picked", action="store_true", help="只把入选股票写入结果表（默认写入全部股票的 picked=true/false）")
+    p.add_argument(
+        "--result-table-prefix",
+        type=str,
+        default="stock_pick_results_",
+        help="结果表前缀，最终表名=前缀+YYYYMMDD（默认 stock_pick_results_）",
+    )
+    p.add_argument("--retention-days", type=int, default=30, help="结果分表保留天数，默认 30 天；到期自动删表")
+    p.add_argument("--disable-cleanup", action="store_true", help="禁用过期结果表清理")
     return p.parse_args()
+
+
+def result_table_name(prefix: str, td: date) -> str:
+    if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", prefix):
+        raise ValueError(f"非法前缀：{prefix}")
+    return f"{prefix}{td.strftime('%Y%m%d')}"
+
+
+def cleanup_old_result_tables(conn, prefix: str, retention_days: int) -> int:
+    """
+    删除超过 retention_days 的结果分表。
+    规则：表名匹配 {prefix}\\d{8}，按日期后缀判断。
+    """
+    if retention_days <= 0:
+        return 0
+    cutoff = date.today() - timedelta(days=retention_days)
+    pattern = re.compile(re.escape(prefix) + r"(\\d{8})$")
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_type = 'BASE TABLE'
+              AND table_name LIKE %s;
+            """,
+            (prefix + "%",),
+        )
+        tables = [r[0] for r in cur.fetchall()]
+
+        to_drop: List[str] = []
+        for t in tables:
+            m = pattern.match(t)
+            if not m:
+                continue
+            try:
+                t_date = datetime.strptime(m.group(1), "%Y%m%d").date()
+            except Exception:
+                continue
+            if t_date < cutoff:
+                to_drop.append(t)
+
+        for t in to_drop:
+            cur.execute(psycopg2.sql.SQL("DROP TABLE IF EXISTS {t};").format(t=psycopg2.sql.Identifier(t)))
+
+    if to_drop:
+        conn.commit()
+    return len(to_drop)
+
+
+def build_metrics_en(vars_: Dict[str, Value]) -> Dict[str, Optional[float]]:
+    """
+    metrics 字段使用英文 key，避免中文。
+    """
+    mapping = {
+        "J": "j",
+        "短期趋势线": "short_trend_line",
+        "知行多空线": "bull_bear_line",
+        "振幅": "amplitude_pct",
+        "涨跌幅": "change_pct",
+    }
+    out: Dict[str, Optional[float]] = {}
+    for k_cn, k_en in mapping.items():
+        if k_cn not in vars_:
+            continue
+        vv = vars_[k_cn]
+        if isinstance(vv, pd.Series):
+            v_last = vv.iloc[-1]
+            out[k_en] = None if pd.isna(v_last) else float(v_last)
+    return out
 
 
 def main() -> int:
@@ -566,8 +691,6 @@ def main() -> int:
 
     conn = pg_connect(cfg)
     try:
-        ensure_result_table(conn)
-
         adjust = resolve_adjust(conn, args.adjust)
         if args.trade_date:
             td = datetime.strptime(args.trade_date, "%Y-%m-%d").date()
@@ -575,12 +698,20 @@ def main() -> int:
             td = get_latest_trade_date(conn, adjust=adjust)
         print(f"[INFO] 选股交易日: {td}；adjust={repr(adjust)}")
 
+        table_name = result_table_name(args.result_table_prefix, td)
+        ensure_result_table(conn, table_name)
+        if not args.disable_cleanup:
+            dropped = cleanup_old_result_tables(conn, args.result_table_prefix, args.retention_days)
+            if dropped:
+                print(f"[INFO] 已清理过期结果表 {dropped} 张（保留 {args.retention_days} 天）")
+
         universe = load_universe(conn, limit=args.limit)
         if not universe:
             raise RuntimeError("stock_basic 为空（请先运行入库脚本）")
         print(f"[INFO] 股票数量: {len(universe)}")
 
-        results: List[Tuple[str, date, str, str, str, bool, Any]] = []
+        # 只写入入选股票
+        results: List[Tuple[str, date, str, str, str, Any]] = []
         ok, fail, picked_n = 0, 0, 0
 
         for idx, (code, name, exchange) in enumerate(universe, start=1):
@@ -592,55 +723,49 @@ def main() -> int:
                 df = df.reset_index(drop=True)
                 df.index = pd.RangeIndex(len(df))
 
-                ctx = TdxContext(df=df, code=code, exchange=exchange)
+                ctx = TdxContext(df=df, code=code, exchange=exchange, name=name)
                 vars_ = eval_tdx(stmts, output_var, ctx)
 
                 cond = vars_[output_var]
                 cond_s = _as_bool_series(cond, ctx.index)
                 picked = bool(cond_s.iloc[-1])
 
-                metrics = {}
-                for k in ("J", "短期趋势线", "知行多空线", "振幅", "涨跌幅"):
-                    if k in vars_:
-                        vv = vars_[k]
-                        if isinstance(vv, pd.Series):
-                            v_last = vv.iloc[-1]
-                            metrics[k] = None if pd.isna(v_last) else float(v_last)
-                metrics_jsonb = psycopg2.extras.Json(metrics, dumps=lambda o: json.dumps(o, ensure_ascii=False))
-
                 if picked:
                     picked_n += 1
-                if (not args.only_picked) or picked:
-                    results.append((args.rule_name, td, code, name, exchange, picked, metrics_jsonb))
+                    metrics = build_metrics_en(vars_)
+                    metrics_jsonb = psycopg2.extras.Json(metrics, dumps=lambda o: json.dumps(o, ensure_ascii=False))
+                    results.append((args.rule_name, td, code, name, exchange, metrics_jsonb))
                 ok += 1
             except Exception as e:
                 fail += 1
                 print(f"[WARN] {idx}/{len(universe)} {code} {name} 计算失败：{e}", file=sys.stderr)
 
             if idx % 200 == 0:
-                print(f"[PROGRESS] {idx}/{len(universe)} OK={ok} FAIL={fail} PICKED={picked_n} 待写入={len(results)}")
+                print(f"[PROGRESS] {idx}/{len(universe)} OK={ok} FAIL={fail} PICKED={picked_n}")
 
         # 批量写入结果表
         if results:
             with conn.cursor() as cur:
                 psycopg2.extras.execute_values(
                     cur,
-                    """
-                    INSERT INTO stock_pick_results(rule_name, trade_date, code, name, exchange, picked, metrics)
-                    VALUES %s
-                    ON CONFLICT (rule_name, trade_date, code) DO UPDATE SET
-                      name = EXCLUDED.name,
-                      exchange = EXCLUDED.exchange,
-                      picked = EXCLUDED.picked,
-                      metrics = EXCLUDED.metrics,
-                      created_at = NOW();
-                    """,
+                    psycopg2.sql.SQL(
+                        """
+                        INSERT INTO {t}(rule_name, trade_date, code, name, exchange, metrics)
+                        VALUES %s
+                        ON CONFLICT (rule_name, code) DO UPDATE SET
+                          trade_date = EXCLUDED.trade_date,
+                          name = EXCLUDED.name,
+                          exchange = EXCLUDED.exchange,
+                          metrics = EXCLUDED.metrics,
+                          created_at = NOW();
+                        """
+                    ).format(t=psycopg2.sql.Identifier(table_name)),
                     results,
                     page_size=2000,
                 )
             conn.commit()
 
-        print(f"[DONE] 交易日={td} 规则={args.rule_name} 入选={picked_n} 写入行数={len(results)} 失败={fail}")
+        print(f"[DONE] 交易日={td} 规则={args.rule_name} 入选={picked_n} 写入表={table_name} 行数={len(results)} 失败={fail}")
         return 0
     finally:
         conn.close()

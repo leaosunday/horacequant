@@ -12,6 +12,8 @@ J:=3*K-2*D;
 
 剔除北证 := NOT(INBLOCK('北证A股'));
 
+剔除ST := NOT(NAMELIKE('ST') OR NAMELIKE('*ST') OR NAMELIKE('SST') OR NAMELIKE('S*ST'));
+
 选股条件:
 J <= 13 AND 
 短期趋势线 > 知行多空线 AND 
@@ -20,4 +22,5 @@ CLOSE >= 知行多空线 AND
 涨跌幅 >= -2 AND 涨跌幅 <= 1.8 AND
 剔除创业板 AND 
 剔除科创 AND 
-剔除北证;
+剔除北证 AND
+剔除ST;

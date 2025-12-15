@@ -11,7 +11,7 @@
   export PG_PORT=5432
   export PG_USER=postgres
   export PG_PASSWORD=your_password
-  export PG_DB=a_share
+  export PG_DB=horace_quant
   python a_share_daily_to_postgres.py
 
 可选参数：
@@ -63,7 +63,7 @@ def load_pg_config() -> PgConfig:
         user=_env("PG_USER", getpass.getuser()),
         # 密码允许为空（例如本地 trust / peer 认证，或你自己用 .pgpass 管理）
         password=os.getenv("PG_PASSWORD", ""),
-        dbname=_env("PG_DB", "a_share"),
+        dbname=_env("PG_DB", "horace_quant"),
     )
 
 
