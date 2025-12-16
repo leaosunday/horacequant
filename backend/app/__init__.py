@@ -1,0 +1,2 @@
+"""HoraceQuant backend package."""
+

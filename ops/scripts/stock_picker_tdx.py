@@ -1,5 +1,5 @@
 """
-从 PostgreSQL 读取 A 股历史日K线，按通达信选股公式（.tdx）计算并选股，结果写回 PostgreSQL。
+运维脚本：从 PostgreSQL 读取 A 股历史日K线，按通达信选股公式（.tdx）计算并选股，结果写回 PostgreSQL。
 
 默认适配本项目的库表：
   - stock_basic(code, name, exchange, ak_symbol, ...)
@@ -8,7 +8,7 @@
 当前实现的 TDX 公式子集（覆盖 rules/b1.tdx 所需）：
   - 基础字段：O/H/L/C(LOSE)/V(OL)/AMOUNT
   - 运算：+ - * /, 比较 <= >= < >, 逻辑 AND OR NOT, 括号
-  - 函数：REF(x,n), MA(x,n), EMA(x,n), SMA(x,n,m), LLV(x,n), HHV(x,n), INBLOCK('创业板'/'科创板'/'北证A股')
+  - 函数：REF(x,n), MA(x,n), EMA(x,n), SMA(x,n,m), LLV(x,n), HHV(x,n), INBLOCK('创业板'/'科创板'/'北证A股'), NAMELIKE('ST'/'S*ST'等)
   - 语句：变量赋值 := ，输出变量 : （如 “选股条件:”）
 
 用法示例：
@@ -18,10 +18,10 @@
   export PG_USER=你的pg用户名
   export PG_PASSWORD=你的pg密码  # 可为空
   export PG_DB=horace_quant
-  python stock_picker_tdx.py --rule rules/b1.tdx --rule-name b1
+  python ops/scripts/stock_picker_tdx.py --rule rules/b1.tdx --rule-name b1
 
   # 指定选股日期（默认取数据库中的最新交易日）
-  python stock_picker_tdx.py --rule rules/b1.tdx --rule-name b1 --trade-date 2025-12-11
+  python ops/scripts/stock_picker_tdx.py --rule rules/b1.tdx --rule-name b1 --trade-date 2025-12-11
 """
 
 from __future__ import annotations
@@ -34,12 +34,24 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 import psycopg2
 import psycopg2.extras
 import psycopg2.sql
+
+
+def find_repo_root() -> Path:
+    """
+    为了脚本移动后依然可用：从当前文件向上找包含 rules/ 或 .git 的目录作为项目根目录。
+    """
+    here = Path(__file__).resolve()
+    for p in [here.parent] + list(here.parents):
+        if (p / ".git").exists() or (p / "rules").is_dir():
+            return p
+    return Path.cwd()
 
 
 @dataclass(frozen=True)
@@ -181,8 +193,7 @@ def load_kline(conn, code: str, trade_date: date, adjust: str, lookback_days: in
         rows = cur.fetchall()
     if not rows:
         return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=["trade_date", "open", "high", "low", "close", "volume", "amount"])
-    return df
+    return pd.DataFrame(rows, columns=["trade_date", "open", "high", "low", "close", "volume", "amount"])
 
 
 # -----------------------------
@@ -190,7 +201,6 @@ def load_kline(conn, code: str, trade_date: date, adjust: str, lookback_days: in
 # -----------------------------
 
 Token = Tuple[str, str]  # (type, value)
-
 
 _TOKEN_RE = re.compile(
     r"""
@@ -259,7 +269,6 @@ class TdxContext:
         self.name = name
         self.index = df.index
 
-        # 基础字段映射（兼容 C/CLOSE/HIGH/...）
         self.base: Dict[str, pd.Series] = {
             "OPEN": df["open"],
             "O": df["open"],
@@ -276,45 +285,34 @@ class TdxContext:
         self.vars: Dict[str, Value] = {}
 
     def get_ident(self, name: str) -> Value:
-        # 变量优先，其次基础字段
         if name in self.vars:
             return self.vars[name]
         up = name.upper()
         if up in self.base:
             return self.base[up]
-        # 未定义变量默认报错（避免 silent bug）
         raise KeyError(f"未知标识符：{name}")
 
-    # --- TDX 常用函数实现 ---
     def REF(self, x: Value, n: Value) -> pd.Series:
         n_int = int(float(n)) if not isinstance(n, pd.Series) else int(float(n.iloc[-1]))
-        s = _as_series(x, self.index)
-        return s.shift(n_int)
+        return _as_series(x, self.index).shift(n_int)
 
     def MA(self, x: Value, n: Value) -> pd.Series:
         n_int = int(float(n)) if not isinstance(n, pd.Series) else int(float(n.iloc[-1]))
-        s = _as_series(x, self.index)
-        return s.rolling(window=n_int, min_periods=1).mean()
+        return _as_series(x, self.index).rolling(window=n_int, min_periods=1).mean()
 
     def EMA(self, x: Value, n: Value) -> pd.Series:
         n_int = int(float(n)) if not isinstance(n, pd.Series) else int(float(n.iloc[-1]))
-        s = _as_series(x, self.index)
-        return s.ewm(span=n_int, adjust=False).mean()
+        return _as_series(x, self.index).ewm(span=n_int, adjust=False).mean()
 
     def LLV(self, x: Value, n: Value) -> pd.Series:
         n_int = int(float(n)) if not isinstance(n, pd.Series) else int(float(n.iloc[-1]))
-        s = _as_series(x, self.index)
-        return s.rolling(window=n_int, min_periods=1).min()
+        return _as_series(x, self.index).rolling(window=n_int, min_periods=1).min()
 
     def HHV(self, x: Value, n: Value) -> pd.Series:
         n_int = int(float(n)) if not isinstance(n, pd.Series) else int(float(n.iloc[-1]))
-        s = _as_series(x, self.index)
-        return s.rolling(window=n_int, min_periods=1).max()
+        return _as_series(x, self.index).rolling(window=n_int, min_periods=1).max()
 
     def SMA(self, x: Value, n: Value, m: Value) -> pd.Series:
-        """
-        通达信 SMA: SMA(X,N,M) = (M*X + (N-M)*REF(SMA,1)) / N，递推算法。
-        """
         n_int = int(float(n)) if not isinstance(n, pd.Series) else int(float(n.iloc[-1]))
         m_int = int(float(m)) if not isinstance(m, pd.Series) else int(float(m.iloc[-1]))
         x_s = _as_series(x, self.index).astype(float)
@@ -327,10 +325,6 @@ class TdxContext:
         return out
 
     def INBLOCK(self, block: Value) -> pd.Series:
-        """
-        这里用“代码前缀/交易所”近似实现板块判断（离线，无需额外数据源）。
-        b1.tdx 只用到：创业板 / 科创板 / 北证A股
-        """
         if not isinstance(block, str):
             raise TypeError("INBLOCK 参数必须是字符串，如 INBLOCK('创业板')")
         b = block.strip()
@@ -343,17 +337,10 @@ class TdxContext:
         elif b in ("北证A股", "北证"):
             flag = (ex == "BJ") or code.startswith(("83", "87", "88", "92"))
         else:
-            # 未覆盖的板块：默认 False
             flag = False
         return pd.Series([flag] * len(self.index), index=self.index, dtype=bool)
 
     def NAMELIKE(self, pattern: Value) -> pd.Series:
-        """
-        通达信 NAMELIKE：按股票名称做模式匹配。
-        这里做一个离线实现：
-          - pattern 不含 '*'：按“包含子串”判断（例如 'ST' in name）
-          - pattern 含 '*'：'*' 视为通配任意长度字符，转换成正则并做 search
-        """
         if not isinstance(pattern, str):
             raise TypeError("NAMELIKE 参数必须是字符串，如 NAMELIKE('ST') 或 NAMELIKE('S*ST')")
         p = pattern.strip()
@@ -363,7 +350,6 @@ class TdxContext:
         elif "*" not in p:
             flag = p in nm
         else:
-            # 将 * 转成 .*
             re_pat = re.escape(p).replace("\\*", ".*")
             flag = re.search(re_pat, nm) is not None
         return pd.Series([flag] * len(self.index), index=self.index, dtype=bool)
@@ -486,7 +472,6 @@ class Parser:
             return tok[1]
         if tok[0] == "IDENT":
             name = self.eat("IDENT")[1]
-            # 函数调用
             if self.match("OP", "("):
                 self.eat("OP", "(")
                 args: List[Value] = []
@@ -527,22 +512,14 @@ class Parser:
 
 
 def parse_tdx_file(text: str) -> Tuple[Dict[str, str], str]:
-    """
-    返回：
-      - statements: {var_name: expr_str}（包含 := 与 : 两种）
-      - output_var: 输出变量名（优先取最后一个使用 ":" 的变量；否则取最后一条语句的变量）
-    """
-    # 去掉空行；保留中文变量名
     lines = [ln.rstrip() for ln in text.splitlines()]
     buf = "\n".join(lines)
-    # 按分号切分语句（通达信语句以 ; 结尾）
     raw_stmts = [s.strip() for s in buf.split(";") if s.strip()]
 
     stmts: Dict[str, str] = {}
     output_var = ""
     last_var = ""
     for s in raw_stmts:
-        # 兼容一行里多个语句被 split 后残留换行
         s = " ".join([x.strip() for x in s.splitlines() if x.strip()])
         if ":=" in s:
             var, expr = s.split(":=", 1)
@@ -551,7 +528,6 @@ def parse_tdx_file(text: str) -> Tuple[Dict[str, str], str]:
             stmts[var] = expr
             last_var = var
         elif ":" in s:
-            # 输出变量：NAME: expr
             var, expr = s.split(":", 1)
             var = var.strip()
             expr = expr.strip()
@@ -559,7 +535,6 @@ def parse_tdx_file(text: str) -> Tuple[Dict[str, str], str]:
             output_var = var
             last_var = var
         else:
-            # 无法识别的语句：忽略/报错
             raise ValueError(f"无法识别的语句：{s}")
 
     if not output_var:
@@ -570,9 +545,6 @@ def parse_tdx_file(text: str) -> Tuple[Dict[str, str], str]:
 
 
 def eval_tdx(stmts: Dict[str, str], output_var: str, ctx: TdxContext) -> Dict[str, Value]:
-    """
-    执行语句，返回 ctx.vars（包含 output_var 对应序列）。
-    """
     for var, expr in stmts.items():
         tokens = tokenize(expr)
         v = Parser(tokens, ctx).parse()
@@ -582,29 +554,6 @@ def eval_tdx(stmts: Dict[str, str], output_var: str, ctx: TdxContext) -> Dict[st
     return ctx.vars
 
 
-# -----------------------------
-# 主流程：计算 + 选股 + 入库
-# -----------------------------
-
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser()
-    p.add_argument("--rule", type=str, default="rules/b1.tdx", help="通达信选股公式文件路径")
-    p.add_argument("--rule-name", type=str, default="b1", help="规则名（写入结果表时使用）")
-    p.add_argument("--trade-date", type=str, default="", help="选股日期 YYYY-MM-DD（默认数据库最新交易日）")
-    p.add_argument("--adjust", type=str, default="", help='复权类型：""|qfq|hfq（需与入库时一致）')
-    p.add_argument("--lookback-days", type=int, default=450, help="拉取历史窗口（天），至少需覆盖 MA114 等")
-    p.add_argument("--limit", type=int, default=0, help="仅处理前 N 只股票（调试用）")
-    p.add_argument(
-        "--result-table-prefix",
-        type=str,
-        default="stock_pick_results_",
-        help="结果表前缀，最终表名=前缀+YYYYMMDD（默认 stock_pick_results_）",
-    )
-    p.add_argument("--retention-days", type=int, default=30, help="结果分表保留天数，默认 30 天；到期自动删表")
-    p.add_argument("--disable-cleanup", action="store_true", help="禁用过期结果表清理")
-    return p.parse_args()
-
-
 def result_table_name(prefix: str, td: date) -> str:
     if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", prefix):
         raise ValueError(f"非法前缀：{prefix}")
@@ -612,14 +561,10 @@ def result_table_name(prefix: str, td: date) -> str:
 
 
 def cleanup_old_result_tables(conn, prefix: str, retention_days: int) -> int:
-    """
-    删除超过 retention_days 的结果分表。
-    规则：表名匹配 {prefix}\\d{8}，按日期后缀判断。
-    """
     if retention_days <= 0:
         return 0
     cutoff = date.today() - timedelta(days=retention_days)
-    pattern = re.compile(re.escape(prefix) + r"(\\d{8})$")
+    pattern = re.compile(re.escape(prefix) + r"(\d{8})$")
 
     with conn.cursor() as cur:
         cur.execute(
@@ -655,9 +600,6 @@ def cleanup_old_result_tables(conn, prefix: str, retention_days: int) -> int:
 
 
 def build_metrics_en(vars_: Dict[str, Value]) -> Dict[str, Optional[float]]:
-    """
-    metrics 字段使用英文 key，避免中文。
-    """
     mapping = {
         "J": "j",
         "短期趋势线": "short_trend_line",
@@ -676,16 +618,37 @@ def build_metrics_en(vars_: Dict[str, Value]) -> Dict[str, Optional[float]]:
     return out
 
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser()
+    p.add_argument("--rule", type=str, default="rules/b1.tdx", help="通达信选股公式文件路径（相对项目根目录）")
+    p.add_argument("--rule-name", type=str, default="b1", help="规则名（写入结果表时使用）")
+    p.add_argument("--trade-date", type=str, default="", help="选股日期 YYYY-MM-DD（默认数据库最新交易日）")
+    p.add_argument("--adjust", type=str, default="", help='复权类型：""|qfq|hfq（需与入库时一致）')
+    p.add_argument("--lookback-days", type=int, default=450, help="拉取历史窗口（天），至少需覆盖 MA114 等")
+    p.add_argument("--limit", type=int, default=0, help="仅处理前 N 只股票（调试用）")
+    p.add_argument(
+        "--result-table-prefix",
+        type=str,
+        default="stock_pick_results_",
+        help="结果表前缀，最终表名=前缀+YYYYMMDD（默认 stock_pick_results_）",
+    )
+    p.add_argument("--retention-days", type=int, default=30, help="结果分表保留天数，默认 30 天；到期自动删表")
+    p.add_argument("--disable-cleanup", action="store_true", help="禁用过期结果表清理")
+    return p.parse_args()
+
+
 def main() -> int:
     args = parse_args()
     cfg = load_pg_config()
 
-    rule_path = os.path.join(os.getcwd(), args.rule) if not os.path.isabs(args.rule) else args.rule
-    if not os.path.exists(rule_path):
+    repo_root = find_repo_root()
+    rule_path = Path(args.rule)
+    if not rule_path.is_absolute():
+        rule_path = repo_root / rule_path
+    if not rule_path.exists():
         raise SystemExit(f"规则文件不存在：{rule_path}")
-    with open(rule_path, "r", encoding="utf-8") as f:
-        tdx_text = f.read()
 
+    tdx_text = rule_path.read_text(encoding="utf-8")
     stmts, output_var = parse_tdx_file(tdx_text)
     print(f"[INFO] 规则: {args.rule_name}；输出变量: {output_var}；语句数: {len(stmts)}")
 
@@ -710,7 +673,6 @@ def main() -> int:
             raise RuntimeError("stock_basic 为空（请先运行入库脚本）")
         print(f"[INFO] 股票数量: {len(universe)}")
 
-        # 只写入入选股票
         results: List[Tuple[str, date, str, str, str, Any]] = []
         ok, fail, picked_n = 0, 0, 0
 
@@ -718,16 +680,13 @@ def main() -> int:
             try:
                 df = load_kline(conn, code=code, trade_date=td, adjust=adjust, lookback_days=args.lookback_days)
                 if df.empty or df["trade_date"].iloc[-1] != td:
-                    # 无数据或缺当天数据：跳过（不计入 fail）
                     continue
                 df = df.reset_index(drop=True)
                 df.index = pd.RangeIndex(len(df))
 
                 ctx = TdxContext(df=df, code=code, exchange=exchange, name=name)
                 vars_ = eval_tdx(stmts, output_var, ctx)
-
-                cond = vars_[output_var]
-                cond_s = _as_bool_series(cond, ctx.index)
+                cond_s = _as_bool_series(vars_[output_var], ctx.index)
                 picked = bool(cond_s.iloc[-1])
 
                 if picked:
@@ -743,7 +702,6 @@ def main() -> int:
             if idx % 200 == 0:
                 print(f"[PROGRESS] {idx}/{len(universe)} OK={ok} FAIL={fail} PICKED={picked_n}")
 
-        # 批量写入结果表
         if results:
             with conn.cursor() as cur:
                 psycopg2.extras.execute_values(

@@ -1,5 +1,5 @@
 """
-使用 AkShare 获取 A 股全市场个股近 2 年日 K 线数据，并保存到 PostgreSQL。
+运维脚本：使用 AkShare 获取 A 股全市场个股近 2 年日 K 线数据，并保存到 PostgreSQL。
 
 要求满足：
 1) 获取历史行情数据使用 ak.stock_zh_a_daily（不要用 stock_zh_a_hist）
@@ -12,7 +12,7 @@
   export PG_USER=postgres
   export PG_PASSWORD=your_password
   export PG_DB=horace_quant
-  python a_share_daily_to_postgres.py
+  python ops/scripts/a_share_daily_to_postgres.py
 
 可选参数：
   --start-date YYYYMMDD   # 覆盖默认“近2年”的起始日期
@@ -181,7 +181,7 @@ def get_all_a_stocks() -> pd.DataFrame:
         if code_col and name_col:
             sym = df[code_col].astype(str).str.lower()
             # 期望形如 sh600000 / sz000001 / bj430047
-            if sym.str.match(r"^(sh|sz|bj)\\d{6}$").any():
+            if sym.str.match(r"^(sh|sz|bj)\d{6}$").any():
                 out = pd.DataFrame(
                     {
                         "code": sym.str[-6:],
