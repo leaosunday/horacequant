@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from backend.app.db.deps import DbDep
+
 router = APIRouter()
 
 
@@ -11,6 +13,7 @@ def hello() -> dict:
 
 
 @router.get("/healthz", tags=["ops"])
-def healthz() -> dict:
-    return {"status": "ok"}
+async def healthz(db: DbDep) -> dict:
+    ok = await db.healthcheck()
+    return {"status": "ok" if ok else "degraded", "db": "ok" if ok else "down"}
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -8,6 +10,7 @@ from backend.app.api.routes import router as api_router
 from backend.app.core.config import settings
 from backend.app.core.logging import configure_logging, get_logger
 from backend.app.core.middleware import RequestIdMiddleware
+from backend.app.db.database import Database, DbConfig
 
 
 logger = get_logger(__name__)
@@ -16,11 +19,36 @@ logger = get_logger(__name__)
 def create_app() -> FastAPI:
     configure_logging(settings.log_level)
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # 初始化 DB 连接池
+        db = Database(
+            DbConfig(
+                host=settings.pg_host,
+                port=settings.pg_port,
+                user=settings.pg_user,
+                password=settings.pg_password,
+                dbname=settings.pg_db,
+                min_pool_size=settings.pg_pool_min,
+                max_pool_size=settings.pg_pool_max,
+                ssl=settings.pg_ssl or None,
+                command_timeout=settings.pg_command_timeout,
+            )
+        )
+        await db.connect()
+        app.state.db = db
+
+        try:
+            yield
+        finally:
+            await db.close()
+
     app = FastAPI(
         title=settings.app_name,
         docs_url="/docs" if settings.env != "prod" else None,
         redoc_url=None,
         openapi_url="/openapi.json" if settings.env != "prod" else None,
+        lifespan=lifespan,
     )
 
     # 安全：Host 头限制（线上请显式配置 HQ_ALLOWED_HOSTS）
