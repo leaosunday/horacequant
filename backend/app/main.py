@@ -11,6 +11,7 @@ from backend.app.core.config import settings
 from backend.app.core.logging import configure_logging, get_logger
 from backend.app.core.middleware import RequestIdMiddleware
 from backend.app.db.database import Database, DbConfig
+from backend.app.services.market_cap import MarketCapService
 
 
 logger = get_logger(__name__)
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
         )
         await db.connect()
         app.state.db = db
+        app.state.market_cap = MarketCapService()
 
         try:
             yield
