@@ -2,7 +2,7 @@
 运维脚本：使用 AkShare 获取 A 股全市场个股近 2 年日 K 线数据，并保存到 PostgreSQL。
 
 要求满足：
-1) 获取历史行情数据使用 ak.stock_zh_a_daily（不要用 stock_zh_a_hist）
+1) 获取历史行情数据使用 ak.stock_zh_a_hist（period="daily"）
 2) 个股基础信息需保存：6 位代码、名称、交易所（"SZ"/"SH"/"BJ"）
 
 用法（示例）：
@@ -124,15 +124,19 @@ def ensure_tables(conn) -> None:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS stock_daily (
-              code        CHAR(6) NOT NULL,
-              trade_date  DATE NOT NULL,
-              open        NUMERIC(18, 4),
-              high        NUMERIC(18, 4),
-              low         NUMERIC(18, 4),
-              close       NUMERIC(18, 4),
-              volume      BIGINT,
-              amount      NUMERIC(20, 2),
-              adjust      TEXT NOT NULL DEFAULT '',
+              code          CHAR(6) NOT NULL,
+              trade_date    DATE NOT NULL,
+              open          NUMERIC(18, 4),
+              high          NUMERIC(18, 4),
+              low           NUMERIC(18, 4),
+              close         NUMERIC(18, 4),
+              volume        BIGINT,
+              amount        NUMERIC(20, 2),
+              amplitude     NUMERIC(10, 4),   -- 振幅(%)
+              pct_change    NUMERIC(10, 4),   -- 涨跌幅(%)
+              change_amount NUMERIC(18, 4),   -- 涨跌额
+              turnover_rate NUMERIC(10, 4),   -- 换手率(%)
+              adjust        TEXT NOT NULL DEFAULT '',
               PRIMARY KEY (code, trade_date, adjust),
               CONSTRAINT fk_stock_daily_code
                 FOREIGN KEY (code) REFERENCES stock_basic(code)
@@ -140,6 +144,26 @@ def ensure_tables(conn) -> None:
             );
             """
         )
+
+        # 若表已存在但缺列（历史遗留），补齐列（你已删表则不会走到这里，但保留迁移兼容）
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema='public' AND table_name='stock_daily';
+            """
+        )
+        cols = {r[0] for r in cur.fetchall()}
+        add_cols = {
+            "amplitude": "NUMERIC(10, 4)",
+            "pct_change": "NUMERIC(10, 4)",
+            "change_amount": "NUMERIC(18, 4)",
+            "turnover_rate": "NUMERIC(10, 4)",
+        }
+        for c, t in add_cols.items():
+            if c not in cols:
+                cur.execute(f'ALTER TABLE stock_daily ADD COLUMN {c} {t};')
+
         cur.execute("CREATE INDEX IF NOT EXISTS idx_stock_daily_trade_date ON stock_daily(trade_date);")
     conn.commit()
     print("[OK] 数据表已就绪: stock_basic, stock_daily")
@@ -254,40 +278,70 @@ def upsert_stock_basic(conn, stocks_df: pd.DataFrame) -> None:
 
 def _normalize_daily_df(df: pd.DataFrame) -> pd.DataFrame:
     """
-    兼容不同列名：尽量映射到 trade_date/open/high/low/close/volume/amount
+    适配 ak.stock_zh_a_hist(period='daily') 常见返回列：
+      日期/开盘/收盘/最高/最低/成交量/成交额/振幅/涨跌幅/涨跌额/换手率
+    统一到：
+      trade_date/open/high/low/close/volume/amount/amplitude/pct_change/change_amount/turnover_rate
     """
     if df is None or df.empty:
-        return pd.DataFrame(columns=["trade_date", "open", "high", "low", "close", "volume", "amount"])
+        return pd.DataFrame(
+            columns=[
+                "trade_date",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "amount",
+                "amplitude",
+                "pct_change",
+                "change_amount",
+                "turnover_rate",
+            ]
+        )
 
     d = df.copy()
-    cols = {c.lower(): c for c in d.columns}
 
-    # 日期列：常见为 date
-    if "date" in cols:
-        d = d.rename(columns={cols["date"]: "trade_date"})
-    elif "日期" in d.columns:
-        d = d.rename(columns={"日期": "trade_date"})
+    mapping = {
+        "日期": "trade_date",
+        "开盘": "open",
+        "最高": "high",
+        "最低": "low",
+        "收盘": "close",
+        "成交量": "volume",
+        "成交额": "amount",
+        "振幅": "amplitude",
+        "涨跌幅": "pct_change",
+        "涨跌额": "change_amount",
+        "换手率": "turnover_rate",
+        # 少数数据源可能会给英文列
+        "date": "trade_date",
+    }
+    for k, v in mapping.items():
+        if k in d.columns:
+            d = d.rename(columns={k: v})
 
-    # OHLCV
-    mapping = {}
-    for k in ("open", "high", "low", "close", "volume", "amount"):
-        if k in cols:
-            mapping[cols[k]] = k
-    d = d.rename(columns=mapping)
-
-    # 中文列兜底（少数情况下）
-    cn_map = {"开盘": "open", "最高": "high", "最低": "low", "收盘": "close", "成交量": "volume", "成交额": "amount"}
-    for c, tgt in cn_map.items():
-        if c in d.columns and tgt not in d.columns:
-            d = d.rename(columns={c: tgt})
-
-    keep = [c for c in ["trade_date", "open", "high", "low", "close", "volume", "amount"] if c in d.columns]
+    keep = [
+        c
+        for c in [
+            "trade_date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "amount",
+            "amplitude",
+            "pct_change",
+            "change_amount",
+            "turnover_rate",
+        ]
+        if c in d.columns
+    ]
     d = d[keep].copy()
-
     d["trade_date"] = pd.to_datetime(d["trade_date"]).dt.date
 
-    # 类型清洗
-    for c in ["open", "high", "low", "close", "amount"]:
+    for c in ["open", "high", "low", "close", "amount", "amplitude", "pct_change", "change_amount", "turnover_rate"]:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
     if "volume" in d.columns:
@@ -297,17 +351,17 @@ def _normalize_daily_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def fetch_daily(code: str, exchange: str, start_date: str, end_date: str, adjust: str, retries: int = 3) -> pd.DataFrame:
-    ak_symbol = to_ak_symbol(code, exchange)
+    # stock_zh_a_hist 使用 6 位数字代码（不带 sh/sz/bj 前缀）
     last_err: Optional[Exception] = None
     for i in range(retries):
         try:
-            df = ak.stock_zh_a_daily(symbol=ak_symbol, start_date=start_date, end_date=end_date, adjust=adjust)
+            df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust=adjust)
             return _normalize_daily_df(df)
         except Exception as e:
             last_err = e
             # 简单退避
             time.sleep(1.0 * (i + 1))
-    raise RuntimeError(f"拉取失败 {code}({exchange}) {ak_symbol}: {last_err}")
+    raise RuntimeError(f"拉取失败 {code}({exchange}) daily(hist): {last_err}")
 
 
 def upsert_stock_daily(conn, code: str, daily_df: pd.DataFrame, adjust: str) -> int:
@@ -327,6 +381,10 @@ def upsert_stock_daily(conn, code: str, daily_df: pd.DataFrame, adjust: str) -> 
                 getattr(r, "close", None),
                 int(getattr(r, "volume")) if getattr(r, "volume", None) is not None and pd.notna(getattr(r, "volume")) else None,
                 getattr(r, "amount", None),
+                getattr(r, "amplitude", None),
+                getattr(r, "pct_change", None),
+                getattr(r, "change_amount", None),
+                getattr(r, "turnover_rate", None),
                 adjust if adjust is not None else "",
             )
         )
@@ -335,7 +393,10 @@ def upsert_stock_daily(conn, code: str, daily_df: pd.DataFrame, adjust: str) -> 
         psycopg2.extras.execute_values(
             cur,
             """
-            INSERT INTO stock_daily(code, trade_date, open, high, low, close, volume, amount, adjust)
+            INSERT INTO stock_daily(
+              code, trade_date, open, high, low, close, volume, amount,
+              amplitude, pct_change, change_amount, turnover_rate, adjust
+            )
             VALUES %s
             ON CONFLICT (code, trade_date, adjust) DO UPDATE SET
               open = EXCLUDED.open,
@@ -343,7 +404,11 @@ def upsert_stock_daily(conn, code: str, daily_df: pd.DataFrame, adjust: str) -> 
               low  = EXCLUDED.low,
               close= EXCLUDED.close,
               volume = EXCLUDED.volume,
-              amount = EXCLUDED.amount;
+              amount = EXCLUDED.amount,
+              amplitude = EXCLUDED.amplitude,
+              pct_change = EXCLUDED.pct_change,
+              change_amount = EXCLUDED.change_amount,
+              turnover_rate = EXCLUDED.turnover_rate;
             """,
             rows,
             page_size=2000,
@@ -360,7 +425,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--start-date", type=str, default=None, help="YYYYMMDD，默认：今天往前两年")
     p.add_argument("--end-date", type=str, default=None, help="YYYYMMDD，默认：今天")
-    p.add_argument("--adjust", type=str, default="", help='复权类型：""|qfq|hfq|qfq-factor|hfq-factor（默认不复权）')
+    p.add_argument("--adjust", type=str, default="", help='复权类型：""|qfq|hfq（默认不复权）')
     p.add_argument("--limit", type=int, default=0, help="仅处理前 N 只股票（调试用，0 表示全部）")
     p.add_argument("--sleep", type=float, default=0.2, help="每只股票拉取后的休眠秒数")
     p.add_argument("--disable-proxy", action="store_true", help="临时禁用 HTTP(S)_PROXY 等代理环境变量（某些网络会导致东财等源不可用）")
