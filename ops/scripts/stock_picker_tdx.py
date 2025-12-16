@@ -604,8 +604,8 @@ def build_metrics_en(vars_: Dict[str, Value]) -> Dict[str, Optional[float]]:
         "J": "j",
         "短期趋势线": "short_trend_line",
         "知行多空线": "bull_bear_line",
-        "振幅": "amplitude_pct",
-        "涨跌幅": "change_pct",
+        "振幅": "amplitude",
+        "涨跌幅": "pct_change",
     }
     out: Dict[str, Optional[float]] = {}
     for k_cn, k_en in mapping.items():
