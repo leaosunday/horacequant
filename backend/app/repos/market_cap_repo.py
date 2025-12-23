@@ -64,3 +64,4 @@ class MarketCapRepo:
             as_of_date,
         )
 
+

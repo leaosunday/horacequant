@@ -191,3 +191,4 @@ class IndicatorsRepo:
                 rows,
             )
 
+

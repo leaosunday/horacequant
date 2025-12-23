@@ -10,7 +10,6 @@ from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.app.db.deps import DbDep, MarketCapDep, IndicatorsRepoDep
-from backend.app.repos.kline_repo import KlineRepo
 from backend.app.repos.picks_repo import PicksRepo
 from backend.app.services.indicators import enrich_indicators
 
@@ -50,6 +49,33 @@ def _df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return json.loads(out.to_json(orient="records"))
 
 
+_INDICATOR_COLS = [
+    "macd_dif",
+    "macd_dea",
+    "macd_hist",
+    "kdj_k",
+    "kdj_d",
+    "kdj_j",
+    "short_trend_line",
+    "bull_bear_line",
+]
+
+
+def _missing_indicator_trade_dates(df: pd.DataFrame) -> set:
+    """
+    更精确的缺失判断：逐行检查指标列。
+    - indicators LEFT JOIN 结果中，如果某天指标行缺失或任一指标字段为 NULL，则该天需要回填
+    返回：需要回填的 trade_date 集合
+    """
+    if df.empty or "trade_date" not in df.columns:
+        return set()
+    cols = [c for c in _INDICATOR_COLS if c in df.columns]
+    if not cols:
+        return set(df["trade_date"].tolist())
+    mask = df[cols].isna().any(axis=1)
+    return set(df.loc[mask, "trade_date"].tolist())
+
+
 @router.get("/picks/{rule_name}/{trade_date}")
 async def get_picks_bundle(
     rule_name: str,
@@ -77,7 +103,6 @@ async def get_picks_bundle(
         td = datetime.strptime(trade_date, "%Y-%m-%d").date()
 
     picks_repo = PicksRepo(db)
-    kline_repo = KlineRepo(db)
 
     try:
         picks = await picks_repo.list_picks(rule_name=rule_name, trade_date=td, limit=limit, cursor_code=cursor)
@@ -94,18 +119,21 @@ async def get_picks_bundle(
 
         cap = await cap_task
         df_d0 = await daily_task
-        if (not df_d0.empty) and ("macd_dif" in df_d0.columns) and df_d0["macd_dif"].isna().all():
+        # 精确缺失判断：只回填缺失的交易日（但计算仍需全窗口，保证递推指标正确）
+        missing_dates_d = _missing_indicator_trade_dates(df_d0)
+        if (not df_d0.empty) and missing_dates_d:
             base = df_d0[["trade_date", "open", "high", "low", "close", "volume", "amount"]].copy()
             df_d = enrich_indicators(base)
-            await indicators_repo.upsert_daily(p.code, adjust, df_d)
+            await indicators_repo.upsert_daily(p.code, adjust, df_d[df_d["trade_date"].isin(missing_dates_d)].copy())
         else:
             df_d = df_d0
         try:
             df_w0 = await weekly_task
-            if (not df_w0.empty) and ("macd_dif" in df_w0.columns) and df_w0["macd_dif"].isna().all():
+            missing_dates_w = _missing_indicator_trade_dates(df_w0)
+            if (not df_w0.empty) and missing_dates_w:
                 base = df_w0[["trade_date", "open", "high", "low", "close", "volume", "amount"]].copy()
                 df_w = enrich_indicators(base)
-                await indicators_repo.upsert_weekly(p.code, adjust, df_w)
+                await indicators_repo.upsert_weekly(p.code, adjust, df_w[df_w["trade_date"].isin(missing_dates_w)].copy())
             else:
                 df_w = df_w0
         except Exception:
