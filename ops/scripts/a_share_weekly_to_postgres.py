@@ -256,6 +256,21 @@ def upsert_stock_weekly(conn, code: str, weekly_df: pd.DataFrame, adjust: str) -
     if weekly_df is None or weekly_df.empty:
         return 0
 
+    # 若本周还未结束，数据源可能会每天更新“本周那根周K”，trade_date 也可能随天变化。
+    # 为避免同一周出现多条记录：删除本周内旧的周K（trade_date 更早的记录），只保留最新一条。
+    latest_td = weekly_df["trade_date"].max()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM stock_weekly
+            WHERE code = %s AND adjust = %s
+              AND date_trunc('week', trade_date) = date_trunc('week', %s::date)
+              AND trade_date < %s::date;
+            """,
+            (code, adjust if adjust is not None else "", latest_td, latest_td),
+        )
+    conn.commit()
+
     rows = []
     for r in weekly_df.itertuples(index=False):
         rows.append(

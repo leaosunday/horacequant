@@ -14,6 +14,7 @@ from backend.app.db.database import Database, DbConfig
 from backend.app.services.market_cap import MarketCapService
 from backend.app.repos.market_cap_repo import MarketCapRepo
 from backend.app.repos.indicators_repo import IndicatorsRepo
+from backend.app.jobs.scheduler import start_scheduler
 
 
 logger = get_logger(__name__)
@@ -49,9 +50,15 @@ def create_app() -> FastAPI:
         await ind_repo.ensure_schema()
         app.state.indicators_repo = ind_repo
 
+        # 启动定时任务（生产环境建议单独跑 worker；这里先内置，便于开发/测试）
+        app.state.scheduler = start_scheduler(db)
+
         try:
             yield
         finally:
+            sch = getattr(app.state, "scheduler", None)
+            if sch is not None:
+                sch.shutdown(wait=False)
             await db.close()
 
     app = FastAPI(

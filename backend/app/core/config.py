@@ -36,6 +36,30 @@ class Settings(BaseSettings):
     pg_pool_max: int = Field(default=10)
     pg_command_timeout: float = Field(default=30.0)
 
+    # ---------- Scheduler / Jobs ----------
+    # 通过 Postgres advisory lock 防止重复执行的锁 key（全局唯一即可）
+    scheduler_lock_key: int = Field(default=42424242)
+
+    # 策略列表：逗号分隔（或 JSON 数组），例如 HQ_STRATEGIES="b1,b2"
+    strategies: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["b1"])
+
+    @field_validator("strategies", mode="before")
+    @classmethod
+    def _parse_strategies(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        if isinstance(v, str):
+            s = v.strip()
+            if s == "":
+                return []
+            if s.startswith("["):
+                # 允许 JSON 数组：交由 pydantic 解码
+                return v
+            return [x.strip() for x in s.split(",") if x.strip()]
+        return v
+
     @field_validator("allowed_hosts", mode="before")
     @classmethod
     def _parse_allowed_hosts(cls, v):
