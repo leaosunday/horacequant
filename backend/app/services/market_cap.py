@@ -3,12 +3,14 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+from datetime import date
 from typing import Optional
 
 import anyio
 import akshare as ak
 
 from backend.app.core.logging import get_logger
+from backend.app.repos.market_cap_repo import MarketCapRepo
 
 
 logger = get_logger(__name__)
@@ -54,7 +56,11 @@ class MarketCapService:
     - 运行在线程池中（避免阻塞 event loop）
     """
 
+    repo: MarketCapRepo
+    # 内存缓存 TTL（秒）：同一进程内短时间重复请求更快
     ttl_seconds: int = 600
+    # DB 缓存有效期（天）：总市值日级更新足够（可按需调整）
+    db_max_age_days: int = 1
     max_concurrency: int = 8
 
     def __post_init__(self):
@@ -66,6 +72,17 @@ class MarketCapService:
         cached = self._cache.get(code)
         if cached and (now - cached[0] <= self.ttl_seconds):
             return cached[1]
+
+        # 优先读 DB 缓存
+        try:
+            row = await self.repo.get_latest(code)
+            if row is not None:
+                age_days = (date.today() - row.as_of_date).days
+                if age_days <= self.db_max_age_days:
+                    self._cache[code] = (time.time(), row.market_cap)
+                    return row.market_cap
+        except Exception:
+            logger.exception("Failed to read market cap cache from DB, code=%s", code)
 
         async with self._sem:
             # double check
@@ -95,6 +112,12 @@ class MarketCapService:
             except Exception:
                 logger.exception("Failed to fetch market cap for code=%s", code)
                 cap = None
+
+            # 写回 DB（即使 cap=None 也记一条，避免频繁打外部源）
+            try:
+                await self.repo.upsert_latest(code=code, market_cap=cap, as_of_date=date.today())
+            except Exception:
+                logger.exception("Failed to upsert market cap cache to DB, code=%s", code)
 
             self._cache[code] = (time.time(), cap)
             return cap

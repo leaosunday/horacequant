@@ -12,6 +12,8 @@ from backend.app.core.logging import configure_logging, get_logger
 from backend.app.core.middleware import RequestIdMiddleware
 from backend.app.db.database import Database, DbConfig
 from backend.app.services.market_cap import MarketCapService
+from backend.app.repos.market_cap_repo import MarketCapRepo
+from backend.app.repos.indicators_repo import IndicatorsRepo
 
 
 logger = get_logger(__name__)
@@ -38,7 +40,14 @@ def create_app() -> FastAPI:
         )
         await db.connect()
         app.state.db = db
-        app.state.market_cap = MarketCapService()
+        # 初始化并确保缓存表存在
+        mc_repo = MarketCapRepo(db)
+        await mc_repo.ensure_schema()
+        app.state.market_cap = MarketCapService(repo=mc_repo)
+
+        ind_repo = IndicatorsRepo(db)
+        await ind_repo.ensure_schema()
+        app.state.indicators_repo = ind_repo
 
         try:
             yield

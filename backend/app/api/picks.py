@@ -9,7 +9,7 @@ import pandas as pd
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 
-from backend.app.db.deps import DbDep, MarketCapDep
+from backend.app.db.deps import DbDep, MarketCapDep, IndicatorsRepoDep
 from backend.app.repos.kline_repo import KlineRepo
 from backend.app.repos.picks_repo import PicksRepo
 from backend.app.services.indicators import enrich_indicators
@@ -56,6 +56,7 @@ async def get_picks_bundle(
     trade_date: str,
     db: DbDep,
     market_cap: MarketCapDep,
+    indicators_repo: IndicatorsRepoDep,
     adjust: str = Query(default="qfq", description='复权类型，需与入库一致（默认 qfq）'),
     window_days: int = Query(default=365, ge=30, le=3650, description="回看窗口天数（默认1年）"),
     limit: int = Query(default=10, ge=1, le=50, description="每页返回股票数量（建议 5~20）"),
@@ -88,13 +89,25 @@ async def get_picks_bundle(
 
     async def build_one(p):
         cap_task = asyncio.create_task(market_cap.get_market_cap(p.code))
-        daily_task = asyncio.create_task(kline_repo.load_daily(p.code, start, td, adjust))
-        weekly_task = asyncio.create_task(kline_repo.load_weekly(p.code, start, td, adjust))
+        daily_task = asyncio.create_task(indicators_repo.load_daily_join(p.code, start, td, adjust))
+        weekly_task = asyncio.create_task(indicators_repo.load_weekly_join(p.code, start, td, adjust))
 
         cap = await cap_task
-        df_d = enrich_indicators(await daily_task)
+        df_d0 = await daily_task
+        if (not df_d0.empty) and ("macd_dif" in df_d0.columns) and df_d0["macd_dif"].isna().all():
+            base = df_d0[["trade_date", "open", "high", "low", "close", "volume", "amount"]].copy()
+            df_d = enrich_indicators(base)
+            await indicators_repo.upsert_daily(p.code, adjust, df_d)
+        else:
+            df_d = df_d0
         try:
-            df_w = enrich_indicators(await weekly_task)
+            df_w0 = await weekly_task
+            if (not df_w0.empty) and ("macd_dif" in df_w0.columns) and df_w0["macd_dif"].isna().all():
+                base = df_w0[["trade_date", "open", "high", "low", "close", "volume", "amount"]].copy()
+                df_w = enrich_indicators(base)
+                await indicators_repo.upsert_weekly(p.code, adjust, df_w)
+            else:
+                df_w = df_w0
         except Exception:
             # 周K可能还未入库；不中断整个接口
             df_w = pd.DataFrame(columns=["trade_date", "open", "high", "low", "close", "volume", "amount"])
