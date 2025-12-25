@@ -79,9 +79,9 @@ async def release_advisory_lock(db: Database, lock_key: int) -> None:
     await db.fetchval("SELECT pg_advisory_unlock($1);", lock_key)
 
 
-async def run_daily_16_pipeline(db: Database, target_date: date, adjust: str = "qfq") -> None:
+async def run_daily_pipeline(db: Database, target_date: date, adjust: str = "qfq") -> None:
     """
-    每日 16:00 任务：
+    每日定时流水线（触发时间由 scheduler 配置决定）：
     1) 拉取并保存当日日K（全市场）
     2) 拉取并保存周K（更新当周；若不是新一周，删除前一天周K后再写入）
     3) 运行策略选股并保存（目前 b1）

@@ -10,7 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from backend.app.core.config import settings
 from backend.app.core.logging import get_logger
 from backend.app.db.database import Database
-from backend.app.jobs.daily_pipeline import run_daily_16_pipeline
+from backend.app.jobs.daily_pipeline import run_daily_pipeline
 
 
 logger = get_logger(__name__)
@@ -27,17 +27,17 @@ def start_scheduler(db: Database) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=tz)
 
     async def job_runner():
-        # 16:00 触发时按上海时区的“当天”运行
+        # 触发时按配置时区的“当天”运行
         now = datetime.now(tz).date()
         try:
-            await run_daily_16_pipeline(db=db, target_date=now, adjust="qfq")
+            await run_daily_pipeline(db=db, target_date=now, adjust="qfq")
         except Exception:
-            logger.exception("Daily 16:00 pipeline failed, date=%s", now)
+            logger.exception("Daily pipeline failed, date=%s", now)
 
     job = scheduler.add_job(
         job_runner,
         CronTrigger(hour=getattr(settings, "scheduler_hour", 16), minute=getattr(settings, "scheduler_minute", 0)),
-        id="daily_16_pipeline",
+        id="daily_pipeline",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -45,7 +45,7 @@ def start_scheduler(db: Database) -> AsyncIOScheduler:
     )
     scheduler.start()
     logger.info(
-        "Scheduler started: daily_16_pipeline at %02d:%02d %s next_run=%s",
+        "Scheduler started: daily_pipeline at %02d:%02d %s next_run=%s",
         getattr(settings, "scheduler_hour", 16),
         getattr(settings, "scheduler_minute", 0),
         getattr(settings, "scheduler_timezone", "Asia/Shanghai"),
@@ -57,7 +57,7 @@ def start_scheduler(db: Database) -> AsyncIOScheduler:
         scheduler.add_job(
             job_runner,
             DateTrigger(run_date=datetime.now(tz)),
-            id="daily_16_pipeline_run_on_start",
+            id="daily_pipeline_run_on_start",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
