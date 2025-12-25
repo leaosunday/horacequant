@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -19,7 +18,7 @@ def start_scheduler(db: Database) -> AsyncIOScheduler:
     tz = ZoneInfo("Asia/Shanghai")
     scheduler = AsyncIOScheduler(timezone=tz)
 
-    async def job():
+    async def job_runner():
         # 16:00 触发时按上海时区的“当天”运行
         now = datetime.now(tz).date()
         try:
@@ -27,12 +26,8 @@ def start_scheduler(db: Database) -> AsyncIOScheduler:
         except Exception:
             logger.exception("Daily 16:00 pipeline failed, date=%s", now)
 
-    # APScheduler 期望普通 callable；用 asyncio.create_task 包一层
-    def _runner():
-        asyncio.create_task(job())
-
     scheduler.add_job(
-        _runner,
+        job_runner,
         CronTrigger(hour=16, minute=0),
         id="daily_16_pipeline",
         replace_existing=True,
