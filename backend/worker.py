@@ -19,7 +19,12 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def app_context():
-    configure_logging(settings.log_level)
+    configure_logging(
+        settings.log_level,
+        to_file=settings.log_to_file,
+        log_dir=settings.log_dir,
+        retention_days=settings.log_retention_days,
+    )
     db = Database(
         DbConfig(
             host=settings.pg_host,

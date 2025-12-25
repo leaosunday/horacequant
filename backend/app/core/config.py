@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, description="服务监听端口")
 
     log_level: str = Field(default="INFO", description="日志级别：DEBUG/INFO/WARNING/ERROR")
+    log_to_file: bool = Field(default=True, description="是否输出到日志文件")
+    log_dir: str = Field(default="logs", description="日志目录（相对或绝对路径）")
+    log_retention_days: int = Field(default=14, description="日志保留天数（按天滚动）")
 
     # 安全：默认只允许本机/容器健康检查；线上请显式配置域名或网关
     allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
