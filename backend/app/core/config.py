@@ -28,6 +28,22 @@ class Settings(BaseSettings):
     # 安全：默认只允许本机/容器健康检查；线上请显式配置域名或网关
     allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
 
+    # ---------- CORS ----------
+    # 供前端联调：默认允许常见本地 dev server（按需通过环境变量覆盖）
+    cors_enabled: bool = Field(default=True, description="是否启用 CORS（给浏览器前端调用）")
+    cors_allow_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
+        description="允许的前端 Origin 列表（逗号分隔或 JSON 数组）",
+    )
+    cors_allow_credentials: bool = Field(default=True, description="是否允许携带 cookie/credentials（若 allow_origins 含 '*' 则必须为 false）")
+    cors_allow_methods: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
+    cors_allow_headers: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
+
     # ---------- Postgres ----------
     pg_host: str = Field(default="127.0.0.1")
     pg_port: int = Field(default=5432)
@@ -92,6 +108,39 @@ class Settings(BaseSettings):
             if s.startswith("["):
                 return v
             return [x.strip() for x in s.split(",") if x.strip()]
+        return v
+
+    @field_validator("cors_allow_origins", "cors_allow_methods", "cors_allow_headers", mode="before")
+    @classmethod
+    def _parse_cors_list(cls, v):
+        """
+        允许使用两种方式配置：
+        - HQ_CORS_ALLOW_ORIGINS='["http://a.com","http://b.com"]'  (JSON)
+        - HQ_CORS_ALLOW_ORIGINS='http://a.com,http://b.com'        (逗号分隔)
+        - HQ_CORS_ALLOW_ORIGINS='*'                                (允许任意 Origin；若如此则 credentials 必须为 false)
+        """
+        if v is None:
+            return v
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        if isinstance(v, str):
+            s = v.strip()
+            if s == "":
+                return []
+            if s == "*":
+                return ["*"]
+            if s.startswith("["):
+                return v
+            return [x.strip() for x in s.split(",") if x.strip()]
+        return v
+
+    @field_validator("cors_allow_credentials")
+    @classmethod
+    def _validate_cors_credentials(cls, v, info):
+        # 若 allow_origins 为 '*'，Starlette 要求 allow_credentials=False
+        origins = (info.data or {}).get("cors_allow_origins") or []
+        if isinstance(origins, list) and "*" in origins and v:
+            raise ValueError("cors_allow_credentials must be false when cors_allow_origins contains '*'")
         return v
 
 

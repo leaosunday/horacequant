@@ -6,15 +6,55 @@ from datetime import date, datetime, timedelta
 from typing import Any, AsyncGenerator, Optional
 
 import pandas as pd
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from backend.app.db.deps import DbDep, MarketCapDep, IndicatorsRepoDep
 from backend.app.repos.picks_repo import PicksRepo
 from backend.app.services.indicators import enrich_indicators
+from backend.app.api.schemas import ApiResponse
 
 
-router = APIRouter(prefix="/api", tags=["picks"])
+router = APIRouter(prefix="/api/v1", tags=["picks"])
+
+
+class KlinePoint(BaseModel):
+    trade_date: str
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    volume: float | None = None
+    amount: float | None = None
+    macd_dif: float | None = None
+    macd_dea: float | None = None
+    macd_hist: float | None = None
+    kdj_k: float | None = None
+    kdj_d: float | None = None
+    kdj_j: float | None = None
+    short_trend_line: float | None = None
+    bull_bear_line: float | None = None
+
+
+class PickBundleItem(BaseModel):
+    code: str
+    name: str
+    exchange: str
+    trade_date: str
+    rule_name: str
+    adjust: str
+    market_cap: float | None = Field(default=None, description="总市值（元）")
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    daily: list[KlinePoint] = Field(default_factory=list)
+    weekly: list[KlinePoint] = Field(default_factory=list)
+
+
+class PicksBundle(BaseModel):
+    rule_name: str
+    trade_date: str
+    next_cursor: str
+    items: list[PickBundleItem]
 
 
 def _to_iso_date(d: Any) -> str:
@@ -76,10 +116,11 @@ def _missing_indicator_trade_dates(df: pd.DataFrame) -> set:
     return set(df.loc[mask, "trade_date"].tolist())
 
 
-@router.get("/picks/{rule_name}/{trade_date}")
+@router.get("/picks/{rule_name}/{trade_date}", response_model=ApiResponse[PicksBundle])
 async def get_picks_bundle(
     rule_name: str,
     trade_date: str,
+    request: Request,
     db: DbDep,
     market_cap: MarketCapDep,
     indicators_repo: IndicatorsRepoDep,
@@ -87,7 +128,6 @@ async def get_picks_bundle(
     window_days: int = Query(default=365, ge=30, le=3650, description="回看窗口天数（默认1年）"),
     limit: int = Query(default=10, ge=1, le=50, description="每页返回股票数量（建议 5~20）"),
     cursor: str = Query(default="", description="游标（上一页最后一个 code），用于分页"),
-    stream: bool = Query(default=False, description="true 则返回 NDJSON 流，前端可边拉边画"),
 ) -> Any:
     """
     返回：选股结果 + 每只股票的市值 + 1年日/周K + 指标（MACD/KDJ/短期趋势线/多空线）。
@@ -95,7 +135,7 @@ async def get_picks_bundle(
     性能策略：
     - cursor 分页（每页最多 50）
     - 市值查询：AkShare + 并发限流 + TTL 缓存
-    - K线与指标：每只股票独立处理，可配合 stream 逐条返回
+    - K线与指标：每只股票独立处理；如需流式返回请调用 /stream 接口
     """
     try:
         td = datetime.strptime(trade_date, "%Y%m%d").date()
@@ -153,26 +193,103 @@ async def get_picks_bundle(
             "weekly": _df_to_records(df_w),
         }
 
-    if stream:
-        async def gen() -> AsyncGenerator[bytes, None]:
-            header = {"rule_name": rule_name, "trade_date": td.strftime("%Y-%m-%d"), "next_cursor": next_cursor}
-            yield (json.dumps({"type": "meta", "data": header}, ensure_ascii=False) + "\n").encode("utf-8")
-            tasks = [asyncio.create_task(build_one(p)) for p in picks]
-            for coro in asyncio.as_completed(tasks):
-                item = await coro
-                yield (json.dumps({"type": "item", "data": item}, ensure_ascii=False) + "\n").encode("utf-8")
-
-        return StreamingResponse(gen(), media_type="application/x-ndjson")
-
     # 非流式：顺序聚合，避免一次性并发过大
     items = []
     for p in picks:
         items.append(await build_one(p))
 
-    return {
-        "rule_name": rule_name,
-        "trade_date": td.strftime("%Y-%m-%d"),
-        "next_cursor": next_cursor,
-        "items": items,
-    }
+    bundle = PicksBundle(
+        rule_name=rule_name,
+        trade_date=td.strftime("%Y-%m-%d"),
+        next_cursor=next_cursor,
+        items=[PickBundleItem(**x) for x in items],
+    )
+    return ApiResponse[PicksBundle](request_id=getattr(request.state, "request_id", None), data=bundle)
+
+
+@router.get("/picks/{rule_name}/{trade_date}/stream")
+async def get_picks_bundle_stream(
+    rule_name: str,
+    trade_date: str,
+    request: Request,
+    db: DbDep,
+    market_cap: MarketCapDep,
+    indicators_repo: IndicatorsRepoDep,
+    adjust: str = Query(default="qfq", description='复权类型，需与入库一致（默认 qfq ）'),
+    window_days: int = Query(default=365, ge=30, le=3650, description="回看窗口天数（默认1年）"),
+    limit: int = Query(default=10, ge=1, le=50, description="每页返回股票数量（建议 5~20）"),
+    cursor: str = Query(default="", description="游标（上一页最后一个 code），用于分页"),
+) -> StreamingResponse:
+    """
+    NDJSON 流式接口：
+    - 第一条为 meta：包含 request_id / next_cursor 等
+    - 后续多条为 item：每只股票一条（可边拉边画）
+    """
+    try:
+        td = datetime.strptime(trade_date, "%Y%m%d").date()
+    except ValueError:
+        td = datetime.strptime(trade_date, "%Y-%m-%d").date()
+
+    picks_repo = PicksRepo(db)
+    try:
+        picks = await picks_repo.list_picks(rule_name=rule_name, trade_date=td, limit=limit, cursor_code=cursor)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    next_cursor = picks[-1].code if picks else ""
+
+    start = td - timedelta(days=window_days)
+
+    async def build_one(p):
+        cap_task = asyncio.create_task(market_cap.get_market_cap(p.code))
+        daily_task = asyncio.create_task(indicators_repo.load_daily_join(p.code, start, td, adjust))
+        weekly_task = asyncio.create_task(indicators_repo.load_weekly_join(p.code, start, td, adjust))
+
+        cap = await cap_task
+        df_d0 = await daily_task
+        missing_dates_d = _missing_indicator_trade_dates(df_d0)
+        if (not df_d0.empty) and missing_dates_d:
+            base = df_d0[["trade_date", "open", "high", "low", "close", "volume", "amount"]].copy()
+            df_d = enrich_indicators(base)
+            await indicators_repo.upsert_daily(p.code, adjust, df_d[df_d["trade_date"].isin(missing_dates_d)].copy())
+        else:
+            df_d = df_d0
+        try:
+            df_w0 = await weekly_task
+            missing_dates_w = _missing_indicator_trade_dates(df_w0)
+            if (not df_w0.empty) and missing_dates_w:
+                base = df_w0[["trade_date", "open", "high", "low", "close", "volume", "amount"]].copy()
+                df_w = enrich_indicators(base)
+                await indicators_repo.upsert_weekly(p.code, adjust, df_w[df_w["trade_date"].isin(missing_dates_w)].copy())
+            else:
+                df_w = df_w0
+        except Exception:
+            df_w = pd.DataFrame(columns=["trade_date", "open", "high", "low", "close", "volume", "amount"])
+
+        return {
+            "code": p.code,
+            "name": p.name,
+            "exchange": p.exchange,
+            "trade_date": td.strftime("%Y-%m-%d"),
+            "rule_name": rule_name,
+            "adjust": adjust,
+            "market_cap": cap,
+            "metrics": p.metrics or {},
+            "daily": _df_to_records(df_d),
+            "weekly": _df_to_records(df_w),
+        }
+
+    async def gen() -> AsyncGenerator[bytes, None]:
+        header = {
+            "rule_name": rule_name,
+            "trade_date": td.strftime("%Y-%m-%d"),
+            "next_cursor": next_cursor,
+            "request_id": getattr(request.state, "request_id", None),
+        }
+        yield (json.dumps({"type": "meta", "data": header}, ensure_ascii=False) + "\n").encode("utf-8")
+        tasks = [asyncio.create_task(build_one(p)) for p in picks]
+        for coro in asyncio.as_completed(tasks):
+            item = await coro
+            yield (json.dumps({"type": "item", "data": item}, ensure_ascii=False) + "\n").encode("utf-8")
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
 

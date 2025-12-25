@@ -3,10 +3,14 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from backend.app.api.routes import router as api_router
+from backend.app.api.schemas import ApiError
 from backend.app.core.config import settings
 from backend.app.core.logging import configure_logging, get_logger
 from backend.app.core.middleware import RequestIdMiddleware
@@ -74,9 +78,37 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # 前端联调：CORS
+    if getattr(settings, "cors_enabled", False):
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(getattr(settings, "cors_allow_origins", [])),
+            allow_credentials=bool(getattr(settings, "cors_allow_credentials", False)),
+            allow_methods=list(getattr(settings, "cors_allow_methods", ["*"])),
+            allow_headers=list(getattr(settings, "cors_allow_headers", ["*"])),
+        )
+
     # 安全：Host 头限制（线上请显式配置 HQ_ALLOWED_HOSTS）
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
     app.add_middleware(RequestIdMiddleware)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        rid = getattr(request.state, "request_id", None)
+        # 统一错误格式；message 尽量稳定，不暴露内部细节
+        msg = exc.detail if isinstance(exc.detail, str) else "http_error"
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=ApiError(code=exc.status_code, message=msg, request_id=rid).model_dump(),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        rid = getattr(request.state, "request_id", None)
+        return JSONResponse(
+            status_code=422,
+            content=ApiError(code=422, message="validation_error", request_id=rid, details=exc.errors()).model_dump(),
+        )
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
@@ -85,7 +117,7 @@ def create_app() -> FastAPI:
         logger.exception("Unhandled exception. request_id=%s path=%s", rid, request.url.path)
         return JSONResponse(
             status_code=500,
-            content={"detail": "internal_server_error", "request_id": rid},
+            content=ApiError(code=500, message="internal_server_error", request_id=rid).model_dump(),
         )
 
     app.include_router(api_router)
