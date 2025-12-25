@@ -4,8 +4,10 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.cron import CronTrigger
 
+from backend.app.core.config import settings
 from backend.app.core.logging import get_logger
 from backend.app.db.database import Database
 from backend.app.jobs.daily_pipeline import run_daily_16_pipeline
@@ -15,7 +17,13 @@ logger = get_logger(__name__)
 
 
 def start_scheduler(db: Database) -> AsyncIOScheduler:
-    tz = ZoneInfo("Asia/Shanghai")
+    if not getattr(settings, "scheduler_enabled", True):
+        tz = ZoneInfo(getattr(settings, "scheduler_timezone", "Asia/Shanghai"))
+        scheduler = AsyncIOScheduler(timezone=tz)
+        logger.info("Scheduler disabled by config")
+        return scheduler
+
+    tz = ZoneInfo(getattr(settings, "scheduler_timezone", "Asia/Shanghai"))
     scheduler = AsyncIOScheduler(timezone=tz)
 
     async def job_runner():
@@ -26,16 +34,34 @@ def start_scheduler(db: Database) -> AsyncIOScheduler:
         except Exception:
             logger.exception("Daily 16:00 pipeline failed, date=%s", now)
 
-    scheduler.add_job(
+    job = scheduler.add_job(
         job_runner,
-        CronTrigger(hour=16, minute=0),
+        CronTrigger(hour=getattr(settings, "scheduler_hour", 16), minute=getattr(settings, "scheduler_minute", 0)),
         id="daily_16_pipeline",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
-        misfire_grace_time=60 * 30,
+        misfire_grace_time=getattr(settings, "scheduler_misfire_grace_seconds", 60 * 30),
     )
     scheduler.start()
-    logger.info("Scheduler started: daily_16_pipeline at 16:00 Asia/Shanghai")
+    logger.info(
+        "Scheduler started: daily_16_pipeline at %02d:%02d %s next_run=%s",
+        getattr(settings, "scheduler_hour", 16),
+        getattr(settings, "scheduler_minute", 0),
+        getattr(settings, "scheduler_timezone", "Asia/Shanghai"),
+        job.next_run_time,
+    )
+
+    # 可选：启动即跑一次，用于验证/补数据
+    if getattr(settings, "scheduler_run_on_start", False):
+        scheduler.add_job(
+            job_runner,
+            DateTrigger(run_date=datetime.now(tz)),
+            id="daily_16_pipeline_run_on_start",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Scheduler run-on-start enabled: will run daily pipeline immediately")
     return scheduler
 

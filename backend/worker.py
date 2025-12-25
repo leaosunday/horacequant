@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from contextlib import asynccontextmanager
-from datetime import date
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    # 兼容 `python backend/worker.py`（此时 sys.path[0] 是 backend/ 目录，不包含项目根）
+    sys.path.insert(0, str(_ROOT))
 
 from backend.app.core.config import settings
 from backend.app.core.logging import configure_logging, get_logger
 from backend.app.db.database import Database, DbConfig
-from backend.app.jobs.daily_pipeline import run_daily_16_pipeline
 from backend.app.jobs.scheduler import start_scheduler
 from backend.app.repos.indicators_repo import IndicatorsRepo
 from backend.app.repos.market_cap_repo import MarketCapRepo
@@ -55,10 +60,19 @@ async def main() -> None:
         scheduler = start_scheduler(db)
         logger.info("Worker running. db=%s", settings.pg_db)
         # 永久运行
-        while True:
-            await asyncio.sleep(3600)
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            # 允许优雅退出（例如 Ctrl+C / SIGTERM）
+            logger.info("Worker cancelled, shutting down.")
+            return
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # 避免打印冗长堆栈
+        pass
 

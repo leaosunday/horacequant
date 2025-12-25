@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # ---------- Scheduler / Jobs ----------
     # 通过 Postgres advisory lock 防止重复执行的锁 key（全局唯一即可）
     scheduler_lock_key: int = Field(default=42424242)
+    scheduler_enabled: bool = Field(default=True, description="是否启用定时任务调度器")
+    scheduler_timezone: str = Field(default="Asia/Shanghai", description="调度时区")
+    scheduler_hour: int = Field(default=16, description="每日任务小时（0-23）")
+    scheduler_minute: int = Field(default=0, description="每日任务分钟（0-59）")
+    scheduler_misfire_grace_seconds: int = Field(default=60 * 30, description="错过触发后的最大补跑窗口（秒）")
+    scheduler_run_on_start: bool = Field(default=False, description="worker 启动时立刻跑一次（用于验证/补数据）")
 
     # 策略列表：逗号分隔（或 JSON 数组），例如 HQ_STRATEGIES="b1,b2"
     strategies: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["b1"])

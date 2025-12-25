@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import akshare as ak
+import pandas as pd
 
 from backend.app.core.logging import get_logger
 from backend.app.core.config import settings
@@ -54,9 +55,19 @@ def is_trade_day_cn(d: date) -> bool:
     """
     使用新浪交易日历判断（需要联网）。
     """
-    df = ak.tool_trade_date_hist_sina()
-    cal = set(df["trade_date"].dt.date.tolist())
-    return d in cal
+    try:
+        df = ak.tool_trade_date_hist_sina()
+        if df is None or df.empty or "trade_date" not in df.columns:
+            logger.warning("Trade calendar empty/unexpected, assume trade day. date=%s", d)
+            return True
+        # 部分环境下 trade_date 可能是 object/str，不能直接用 .dt
+        dt = pd.to_datetime(df["trade_date"], errors="coerce")
+        cal = set(dt.dropna().dt.date.tolist())
+        return d in cal
+    except Exception:
+        # 日历拉取失败时，为避免“误跳过交易日”，默认按交易日处理（后续拉数为空也不会入库）
+        logger.exception("Trade calendar fetch failed, assume trade day. date=%s", d)
+        return True
 
 
 async def try_acquire_advisory_lock(db: Database, lock_key: int) -> bool:
