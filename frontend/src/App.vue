@@ -71,14 +71,26 @@ const tableRows = computed(() => {
 async function load() {
   loading.value = true
   try {
-    const r = await fetchPicksBundle({
-      ruleName: ruleName.value,
-      tradeDate: tradeDate.value,
-      windowDays: 365, // 拉一年，默认缩放到最近 3 个月，支持向左拖
-      limit: 200,
-    })
-    if (r.code !== 0) throw new Error(r.message || 'api_error')
-    items.value = r.data.items || []
+    // 后端 limit 最大 50；这里用 cursor 分页拉取更多条
+    const pageSize = 50
+    const maxItems = 200
+    let cursor = ''
+    const all: PickBundleItem[] = []
+    while (all.length < maxItems) {
+      const r = await fetchPicksBundle({
+        ruleName: ruleName.value,
+        tradeDate: tradeDate.value,
+        windowDays: 365, // 拉一年，默认缩放到最近 3 个月，支持向左拖
+        limit: pageSize,
+        cursor,
+      })
+      if (r.code !== 0) throw new Error(r.message || 'api_error')
+      const got = r.data.items || []
+      all.push(...got)
+      if (!r.data.next_cursor || got.length === 0) break
+      cursor = r.data.next_cursor
+    }
+    items.value = all.slice(0, maxItems)
     selectedCode.value = items.value[0]?.code ?? ''
   } catch (e: any) {
     console.error(e)
