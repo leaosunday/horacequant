@@ -18,7 +18,7 @@ from backend.app.db.database import Database
 logger = get_logger(__name__)
 
 
-def repo_root() -> Path:
+def project_root() -> Path:
     here = Path(__file__).resolve()
     for p in [here.parent] + list(here.parents):
         if (p / ".git").exists():
@@ -27,11 +27,15 @@ def repo_root() -> Path:
     return Path.cwd()
 
 
+def backend_root() -> Path:
+    return project_root() / "backend"
+
+
 async def run_cmd(args: list[str], cwd: Optional[Path] = None, env: Optional[dict[str, str]] = None) -> None:
     """
     运行外部脚本（用于复用现有 ops 脚本/选股逻辑），并记录 stdout/stderr。
     """
-    cwd = cwd or repo_root()
+    cwd = cwd or project_root()
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=str(cwd),
@@ -100,12 +104,13 @@ async def run_daily_pipeline(db: Database, target_date: date, adjust: str = "qfq
             logger.info("Not a trade day, skip pipeline. date=%s", target_date)
             return
 
-        root = repo_root()
+        root = project_root()
+        broot = backend_root()
         py = sys.executable
         env = os.environ.copy()
 
         # 1) 日K：只拉当天
-        daily_script = root / "ops" / "scripts" / "a_share_daily_to_postgres.py"
+        daily_script = broot / "ops" / "scripts" / "a_share_daily_to_postgres.py"
         await run_cmd(
             [
                 py,
@@ -122,7 +127,7 @@ async def run_daily_pipeline(db: Database, target_date: date, adjust: str = "qfq
         )
 
         # 2) 周K：只需要覆盖近 30 天以包含当周
-        weekly_script = root / "ops" / "scripts" / "a_share_weekly_to_postgres.py"
+        weekly_script = broot / "ops" / "scripts" / "a_share_weekly_to_postgres.py"
         start_weekly = (target_date - timedelta(days=30)).strftime("%Y%m%d")
         await run_cmd(
             [
@@ -140,10 +145,10 @@ async def run_daily_pipeline(db: Database, target_date: date, adjust: str = "qfq
         )
 
         # 3) 选股：遍历策略列表（复用 ops 脚本，保证公式一致）
-        picker_script = root / "ops" / "scripts" / "stock_picker_tdx.py"
+        picker_script = broot / "ops" / "scripts" / "stock_picker_tdx.py"
         strategies = list(getattr(settings, "strategies", ["b1"])) or ["b1"]
         for strat in strategies:
-            rule_path = root / "rules" / f"{strat}.tdx"
+            rule_path = broot / "rules" / f"{strat}.tdx"
             if not rule_path.exists():
                 logger.warning("Strategy rule file not found, skip. strategy=%s path=%s", strat, rule_path)
                 continue

@@ -6,13 +6,13 @@
   ak.stock_zh_a_hist(symbol="920992", period="weekly", start_date="20231222", end_date="20251230", adjust="qfq")
 
 依赖：
-  pip install -r requirements.txt
+  pip install -r backend/requirements.txt
 
 环境变量（可覆盖）：
   PG_HOST / PG_PORT / PG_USER / PG_PASSWORD / PG_DB (默认 horace_quant)
 
 用法（示例）：
-  python ops/scripts/a_share_weekly_to_postgres.py --adjust qfq
+  python backend/ops/scripts/a_share_weekly_to_postgres.py --adjust qfq
 
 参数：
   --start-date YYYYMMDD   # 默认：今天往前两年

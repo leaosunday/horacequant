@@ -5,7 +5,7 @@
   - stock_basic(code, name, exchange, ak_symbol, ...)
   - stock_daily(code, trade_date, open, high, low, close, volume, amount, adjust, ...)
 
-当前实现的 TDX 公式子集（覆盖 rules/b1.tdx 所需）：
+当前实现的 TDX 公式子集（覆盖 backend/rules/b1.tdx 所需）：
   - 基础字段：O/H/L/C(LOSE)/V(OL)/AMOUNT
   - 运算：+ - * /, 比较 <= >= < >, 逻辑 AND OR NOT, 括号
   - 函数：REF(x,n), MA(x,n), EMA(x,n), SMA(x,n,m), LLV(x,n), HHV(x,n), INBLOCK('创业板'/'科创板'/'北证A股'), NAMELIKE('ST'/'S*ST'等)
@@ -18,10 +18,10 @@
   export PG_USER=你的pg用户名
   export PG_PASSWORD=你的pg密码  # 可为空
   export PG_DB=horace_quant
-  python ops/scripts/stock_picker_tdx.py --rule rules/b1.tdx --rule-name b1
+  python backend/ops/scripts/stock_picker_tdx.py --rule backend/rules/b1.tdx --rule-name b1
 
   # 指定选股日期（默认取数据库中的最新交易日）
-  python ops/scripts/stock_picker_tdx.py --rule rules/b1.tdx --rule-name b1 --trade-date 2025-12-11
+  python backend/ops/scripts/stock_picker_tdx.py --rule backend/rules/b1.tdx --rule-name b1 --trade-date 2025-12-11
 """
 
 from __future__ import annotations
@@ -45,11 +45,11 @@ import psycopg2.sql
 
 def find_repo_root() -> Path:
     """
-    为了脚本移动后依然可用：从当前文件向上找包含 rules/ 或 .git 的目录作为项目根目录。
+    为了脚本移动后依然可用：从当前文件向上找包含 backend/rules/（或旧 rules/）或 .git 的目录作为项目根目录。
     """
     here = Path(__file__).resolve()
     for p in [here.parent] + list(here.parents):
-        if (p / ".git").exists() or (p / "rules").is_dir():
+        if (p / ".git").exists() or (p / "backend" / "rules").is_dir() or (p / "rules").is_dir():
             return p
     return Path.cwd()
 
@@ -620,7 +620,12 @@ def build_metrics_en(vars_: Dict[str, Value]) -> Dict[str, Optional[float]]:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--rule", type=str, default="rules/b1.tdx", help="通达信选股公式文件路径（相对项目根目录）")
+    p.add_argument(
+        "--rule",
+        type=str,
+        default="backend/rules/b1.tdx",
+        help="通达信选股公式文件路径（相对项目根目录；默认 backend/rules/b1.tdx）",
+    )
     p.add_argument("--rule-name", type=str, default="b1", help="规则名（写入结果表时使用）")
     p.add_argument("--trade-date", type=str, default="", help="选股日期 YYYY-MM-DD（默认数据库最新交易日）")
     p.add_argument("--adjust", type=str, default="", help='复权类型：""|qfq|hfq（需与入库时一致）')

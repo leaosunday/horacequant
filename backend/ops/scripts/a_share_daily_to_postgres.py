@@ -6,13 +6,13 @@
 2) 个股基础信息需保存：6 位代码、名称、交易所（"SZ"/"SH"/"BJ"）
 
 用法（示例）：
-  pip install -r requirements.txt
+  pip install -r backend/requirements.txt
   export PG_HOST=127.0.0.1
   export PG_PORT=5432
   export PG_USER=postgres
   export PG_PASSWORD=your_password
   export PG_DB=horace_quant
-  python ops/scripts/a_share_daily_to_postgres.py
+  python backend/ops/scripts/a_share_daily_to_postgres.py
 
 可选参数：
   --start-date YYYYMMDD   # 覆盖默认“近2年”的起始日期

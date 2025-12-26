@@ -202,7 +202,13 @@ cython_debug/
 .cursorindexingignore
 
 # Runtime logs
-logs/
+backend/logs/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+frontend/.vite/
 
 # Marimo
 marimo/_static/
