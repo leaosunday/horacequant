@@ -183,7 +183,8 @@ def load_kline(conn, code: str, trade_date: date, adjust: str, lookback_days: in
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT trade_date, open, high, low, close, volume, amount
+            SELECT trade_date, open, high, low, close, volume, amount,
+                   amplitude, pct_change, change_amount, turnover_rate
             FROM stock_daily
             WHERE code = %s AND adjust = %s AND trade_date BETWEEN %s AND %s
             ORDER BY trade_date;
@@ -193,7 +194,22 @@ def load_kline(conn, code: str, trade_date: date, adjust: str, lookback_days: in
         rows = cur.fetchall()
     if not rows:
         return pd.DataFrame()
-    return pd.DataFrame(rows, columns=["trade_date", "open", "high", "low", "close", "volume", "amount"])
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "trade_date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "amount",
+            "amplitude",
+            "pct_change",
+            "change_amount",
+            "turnover_rate",
+        ],
+    )
 
 
 # -----------------------------
@@ -606,6 +622,7 @@ def build_metrics_en(vars_: Dict[str, Value]) -> Dict[str, Optional[float]]:
         "知行多空线": "bull_bear_line",
         "振幅": "amplitude",
         "涨跌幅": "pct_change",
+        "换手率": "turnover_rate",
     }
     out: Dict[str, Optional[float]] = {}
     for k_cn, k_en in mapping.items():

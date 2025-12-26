@@ -67,6 +67,7 @@ class IndicatorsRepo:
         rows = await self.db.fetch(
             """
             SELECT d.trade_date, d.open, d.high, d.low, d.close, d.volume, d.amount,
+                   d.amplitude, d.pct_change, d.change_amount, d.turnover_rate,
                    i.macd_dif, i.macd_dea, i.macd_hist, i.kdj_k, i.kdj_d, i.kdj_j,
                    i.short_trend_line, i.bull_bear_line
             FROM stock_daily d
@@ -80,12 +81,31 @@ class IndicatorsRepo:
             start,
             end,
         )
-        return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["trade_date", "open", "high", "low", "close", "volume", "amount"])
+        return (
+            pd.DataFrame(rows)
+            if rows
+            else pd.DataFrame(
+                columns=[
+                    "trade_date",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "amount",
+                    "amplitude",
+                    "pct_change",
+                    "change_amount",
+                    "turnover_rate",
+                ]
+            )
+        )
 
     async def load_weekly_join(self, code: str, start: date, end: date, adjust: str) -> pd.DataFrame:
         rows = await self.db.fetch(
             """
             SELECT w.trade_date, w.open, w.high, w.low, w.close, w.volume, w.amount,
+                   w.amplitude, w.pct_change, w.change_amount, w.turnover_rate,
                    i.macd_dif, i.macd_dea, i.macd_hist, i.kdj_k, i.kdj_d, i.kdj_j,
                    i.short_trend_line, i.bull_bear_line
             FROM stock_weekly w
@@ -99,7 +119,25 @@ class IndicatorsRepo:
             start,
             end,
         )
-        return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["trade_date", "open", "high", "low", "close", "volume", "amount"])
+        return (
+            pd.DataFrame(rows)
+            if rows
+            else pd.DataFrame(
+                columns=[
+                    "trade_date",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "amount",
+                    "amplitude",
+                    "pct_change",
+                    "change_amount",
+                    "turnover_rate",
+                ]
+            )
+        )
 
     async def upsert_daily(self, code: str, adjust: str, df: pd.DataFrame) -> None:
         if df.empty:

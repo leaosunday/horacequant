@@ -27,6 +27,10 @@ class KlinePoint(BaseModel):
     close: float | None = None
     volume: float | None = None
     amount: float | None = None
+    amplitude: float | None = None
+    pct_change: float | None = None
+    change_amount: float | None = None
+    turnover_rate: float | None = None
     macd_dif: float | None = None
     macd_dea: float | None = None
     macd_hist: float | None = None
@@ -73,6 +77,10 @@ def _df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
         "close",
         "volume",
         "amount",
+        "amplitude",
+        "pct_change",
+        "change_amount",
+        "turnover_rate",
         "macd_dif",
         "macd_dea",
         "macd_hist",
