@@ -48,6 +48,14 @@ function n(v: unknown): number | null {
   return Number.isFinite(x) ? x : null
 }
 
+function lastFinite(arr: Array<number | null>): number | null {
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const v = arr[i] ?? null
+    if (v !== null && Number.isFinite(v)) return v
+  }
+  return null
+}
+
 const option = computed(() => {
   const mode = props.mode ?? 'daily'
   const daily = props.daily ?? []
@@ -66,6 +74,16 @@ const option = computed(() => {
   const j = base.map((d) => n(d.kdj_j))
   const stl = base.map((d) => n(d.short_trend_line))
   const bbl = base.map((d) => n(d.bull_bear_line))
+
+  const stlLast = lastFinite(stl)
+  const bblLast = lastFinite(bbl)
+  const difLast = lastFinite(dif)
+  const deaLast = lastFinite(dea)
+  const histLast = lastFinite(hist)
+  const kLast = lastFinite(k)
+  const dLast = lastFinite(d2)
+  const jLast = lastFinite(j)
+  const volLast = lastFinite(vol)
 
   // VOL 柱子按涨跌着色（参考富途）
   const volColor = base.map((d) => {
@@ -112,6 +130,69 @@ const option = computed(() => {
       textStyle: { color: 'rgba(255,255,255,0.75)' },
       selectedMode: false,
     },
+    graphic: [
+      {
+        type: 'group',
+        left: 60,
+        top: 8,
+        silent: true,
+        children: [
+          {
+            type: 'text',
+            style: {
+              text:
+                `ZX  SHORT:${stlLast !== null ? stlLast.toFixed(3) : '--'}   ` +
+                `LONG:${bblLast !== null ? bblLast.toFixed(3) : '--'}`,
+              fill: 'rgba(255,255,255,0.78)',
+              fontSize: 12,
+              fontWeight: 600,
+            },
+          },
+        ],
+      },
+      {
+        type: 'text',
+        left: 60,
+        top: '62%',
+        silent: true,
+        style: {
+          text: `成交量 VOL:${volLast !== null ? volLast.toFixed(3) : '--'}`,
+          fill: 'rgba(255,255,255,0.62)',
+          fontSize: 12,
+          fontWeight: 600,
+        },
+      },
+      {
+        type: 'text',
+        left: 60,
+        top: '74%',
+        silent: true,
+        style: {
+          text:
+            `MACD(12,26,9)  DIF:${difLast !== null ? difLast.toFixed(3) : '--'}  ` +
+            `DEA:${deaLast !== null ? deaLast.toFixed(3) : '--'}  ` +
+            `MACD:${histLast !== null ? histLast.toFixed(3) : '--'}`,
+          fill: 'rgba(255,255,255,0.62)',
+          fontSize: 12,
+          fontWeight: 600,
+        },
+      },
+      {
+        type: 'text',
+        left: 60,
+        top: '88%',
+        silent: true,
+        style: {
+          text:
+            `KDJ(9,3,3)  K:${kLast !== null ? kLast.toFixed(3) : '--'}  ` +
+            `D:${dLast !== null ? dLast.toFixed(3) : '--'}  ` +
+            `J:${jLast !== null ? jLast.toFixed(3) : '--'}`,
+          fill: 'rgba(255,255,255,0.62)',
+          fontSize: 12,
+          fontWeight: 600,
+        },
+      },
+    ],
     grid: [
       { left: 60, right: 20, top: 10, height: '50%' }, // main
       { left: 60, right: 20, top: '62%', height: '10%' }, // vol
@@ -131,8 +212,20 @@ const option = computed(() => {
       { scale: true, gridIndex: 3, axisLine: { lineStyle: { color: '#334155' } }, splitLine: { lineStyle: { color: 'rgba(51,65,85,0.25)' } } },
     ],
     dataZoom: [
-      { type: 'inside', xAxisIndex: [0, 1, 2, 3], start: startPct, end: 100 },
-      { type: 'slider', xAxisIndex: [0, 1, 2, 3], start: startPct, end: 100, height: 18, bottom: 0 },
+      {
+        type: 'inside',
+        xAxisIndex: [0, 1, 2, 3],
+        start: startPct,
+        end: 100,
+        // 交互策略（富途风格）：
+        // - 双指左右拖动：移动日期窗口
+        // - 捏合：缩放
+        // - 关闭“滚轮缩放”（避免触控板上下滚动变成缩放）
+        zoomOnMouseWheel: false,
+        moveOnMouseWheel: true,
+        moveOnMouseMove: true,
+        preventDefaultMouseMove: true,
+      },
     ],
     series: [
       // 主图：日K
@@ -142,6 +235,7 @@ const option = computed(() => {
         xAxisIndex: 0,
         yAxisIndex: 0,
         data: ohlc,
+        barMaxWidth: 10,
         itemStyle: {
           color: '#ef4444',
           color0: '#22c55e',
@@ -157,6 +251,7 @@ const option = computed(() => {
         yAxisIndex: 0,
         data: weeklyOhlc,
         silent: true,
+        barMaxWidth: 10,
         itemStyle: {
           color: 'rgba(248, 113, 113, 0.35)',
           color0: 'rgba(34, 197, 94, 0.35)',
@@ -194,7 +289,7 @@ const option = computed(() => {
 .chart-wrap {
   width: 100%;
   height: 100%;
-  min-height: 520px;
+  min-height: 0;
 }
 .chart {
   width: 100%;
