@@ -57,7 +57,7 @@ body {
 
 .el-input__inner {
   color: var(--hq-text) !important;
-}
+  }
 
 .el-button--primary {
   --el-color-primary: #3b82f6;

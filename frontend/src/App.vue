@@ -14,6 +14,7 @@ const loading = ref(false)
 const items = ref<PickBundleItem[]>([])
 const cursor = ref<string>('')
 const done = ref(false)
+// requestId 仍保留在内存里用于排障，但不在 UI 展示
 const requestId = ref<string | null>(null)
 
 const scrollerRef = ref<HTMLElement | null>(null)
@@ -86,7 +87,7 @@ onUnmounted(() => {
     <div class="topbar">
       <div class="brand">
         <div class="title">HoraceQuant</div>
-        <div class="sub">picks · {{ ruleName }} · {{ tradeDate }} <span v-if="requestId" class="rid">rid={{ requestId }}</span></div>
+        <div class="sub"></div>
       </div>
       <div class="controls">
         <el-input v-model="ruleName" style="width: 120px" placeholder="策略(b1)" />
@@ -149,10 +150,6 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--hq-muted);
 }
-.rid {
-  margin-left: 8px;
-  color: rgba(96, 165, 250, 0.85);
-}
 .controls {
   display: flex;
   gap: 10px;
@@ -166,7 +163,8 @@ onUnmounted(() => {
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: calc((100vh - 56px - 20px - 10px) / 2);
+  /* 1x2：每屏一行，两列 */
+  grid-auto-rows: calc(100vh - 56px - 20px);
   gap: 10px;
 }
 .footer {

@@ -7,7 +7,6 @@
           <span class="name">{{ item.name }}</span>
           <span class="sub">{{ item.exchange }}</span>
         </div>
-        <div class="time">已收盘 {{ snap.ts }}</div>
         <div class="price">
           <div :class="['big', upDown(snap.change)]">{{ fmt2(snap.close) }}</div>
           <div class="delta">
@@ -193,11 +192,6 @@ function fmtAmount(v: unknown): string {
   font-size: 18px;
 }
 .sub {
-  color: var(--hq-muted);
-  font-size: 12px;
-}
-.time {
-  margin-top: 4px;
   color: var(--hq-muted);
   font-size: 12px;
 }
