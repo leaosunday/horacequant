@@ -37,8 +37,9 @@ defineOptions({ name: 'KlineMultiPanel' })
 const props = defineProps<{
   daily: KlinePoint[]
   weekly: KlinePoint[]
-  // 初始展示窗口：最后 N 根日K（≈ 3 个月交易日 ~ 60）
-  initialDailyCandles?: number
+  mode?: 'daily' | 'weekly' | 'overlay'
+  // 初始展示窗口：最后 N 根 K（默认 60）
+  initialCandles?: number
 }>()
 
 function n(v: unknown): number | null {
@@ -48,37 +49,52 @@ function n(v: unknown): number | null {
 }
 
 const option = computed(() => {
+  const mode = props.mode ?? 'daily'
   const daily = props.daily ?? []
   const weekly = props.weekly ?? []
-  const x = daily.map((d) => d.trade_date)
 
-  const dailyOhlc = daily.map((d) => [n(d.open), n(d.close), n(d.low), n(d.high)])
-  const dailyVol = daily.map((d) => n(d.volume))
-  const dif = daily.map((d) => n(d.macd_dif))
-  const dea = daily.map((d) => n(d.macd_dea))
-  const hist = daily.map((d) => n(d.macd_hist))
-  const k = daily.map((d) => n(d.kdj_k))
-  const d2 = daily.map((d) => n(d.kdj_d))
-  const j = daily.map((d) => n(d.kdj_j))
-  const stl = daily.map((d) => n(d.short_trend_line))
-  const bbl = daily.map((d) => n(d.bull_bear_line))
+  const base = mode === 'weekly' ? weekly : daily
+  const x = base.map((d) => d.trade_date)
 
-  // 周K：对齐到日K的 x 轴（仅在周K的 trade_date 对应那天画一根，其余置 null）
-  const wkMap = new Map<string, KlinePoint>()
-  for (const w of weekly) wkMap.set(w.trade_date, w)
-  const weeklyOhlc = x.map((td) => {
-    const w = wkMap.get(td)
-    if (!w) return [null, null, null, null]
-    return [n(w.open), n(w.close), n(w.low), n(w.high)]
+  const ohlc = base.map((d) => [n(d.open), n(d.close), n(d.low), n(d.high)])
+  const vol = base.map((d) => n(d.volume))
+  const dif = base.map((d) => n(d.macd_dif))
+  const dea = base.map((d) => n(d.macd_dea))
+  const hist = base.map((d) => n(d.macd_hist))
+  const k = base.map((d) => n(d.kdj_k))
+  const d2 = base.map((d) => n(d.kdj_d))
+  const j = base.map((d) => n(d.kdj_j))
+  const stl = base.map((d) => n(d.short_trend_line))
+  const bbl = base.map((d) => n(d.bull_bear_line))
+
+  // VOL 柱子按涨跌着色（参考富途）
+  const volColor = base.map((d) => {
+    const o = n(d.open)
+    const c = n(d.close)
+    if (o === null || c === null) return 'rgba(148,163,184,0.45)'
+    return c >= o ? 'rgba(255,77,79,0.65)' : 'rgba(34,197,94,0.65)'
   })
 
-  const initialN = props.initialDailyCandles ?? 60
+  // overlay 模式：叠加显示周K（对齐到日K时间轴：仅在周线 trade_date 对应日显示一根）
+  const weeklyOhlc = (() => {
+    if (mode !== 'overlay') return []
+    const dailyX = daily.map((d) => d.trade_date)
+    const wkMap = new Map<string, KlinePoint>()
+    for (const w of weekly) wkMap.set(w.trade_date, w)
+    return dailyX.map((td) => {
+      const w = wkMap.get(td)
+      if (!w) return [null, null, null, null]
+      return [n(w.open), n(w.close), n(w.low), n(w.high)]
+    })
+  })()
+
+  const initialN = props.initialCandles ?? 60
   const total = x.length
   const startPct = total > 0 ? Math.max(0, ((total - initialN) / total) * 100) : 0
 
   return {
     animation: false,
-    backgroundColor: '#0b1220',
+    backgroundColor: '#0b0f14',
     textStyle: { color: '#cbd5e1', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif' },
     axisPointer: { link: [{ xAxisIndex: [0, 1, 2, 3] }] },
     tooltip: {
@@ -87,6 +103,14 @@ const option = computed(() => {
       backgroundColor: 'rgba(15, 23, 42, 0.92)',
       borderColor: '#334155',
       textStyle: { color: '#e2e8f0' },
+    },
+    legend: {
+      top: 6,
+      left: 60,
+      itemWidth: 10,
+      itemHeight: 6,
+      textStyle: { color: 'rgba(255,255,255,0.75)' },
+      selectedMode: false,
     },
     grid: [
       { left: 60, right: 20, top: 10, height: '50%' }, // main
@@ -113,11 +137,11 @@ const option = computed(() => {
     series: [
       // 主图：日K
       {
-        name: '日K',
+        name: mode === 'weekly' ? '周K' : '日K',
         type: 'candlestick',
         xAxisIndex: 0,
         yAxisIndex: 0,
-        data: dailyOhlc,
+        data: ohlc,
         itemStyle: {
           color: '#ef4444',
           color0: '#22c55e',
@@ -127,11 +151,12 @@ const option = computed(() => {
       },
       // 主图：周K（叠加，较透明）
       {
-        name: '周K',
+        name: '周K(叠加)',
         type: 'candlestick',
         xAxisIndex: 0,
         yAxisIndex: 0,
         data: weeklyOhlc,
+        silent: true,
         itemStyle: {
           color: 'rgba(248, 113, 113, 0.35)',
           color0: 'rgba(34, 197, 94, 0.35)',
@@ -143,7 +168,15 @@ const option = computed(() => {
       { name: '短期趋势线', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: stl, showSymbol: false, smooth: true, lineStyle: { width: 1, color: '#60a5fa' } },
       { name: '知行多空线', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: bbl, showSymbol: false, smooth: true, lineStyle: { width: 1, color: '#f59e0b' } },
       // VOL
-      { name: 'VOL', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: dailyVol, barWidth: '60%', itemStyle: { color: 'rgba(148,163,184,0.6)' } },
+      {
+        name: 'VOL',
+        type: 'bar',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: vol,
+        barWidth: '60%',
+        itemStyle: { color: (p: any) => volColor[p.dataIndex] ?? 'rgba(148,163,184,0.45)' },
+      },
       // MACD
       { name: 'DIF', type: 'line', xAxisIndex: 2, yAxisIndex: 2, data: dif, showSymbol: false, smooth: true, lineStyle: { width: 1, color: '#a78bfa' } },
       { name: 'DEA', type: 'line', xAxisIndex: 2, yAxisIndex: 2, data: dea, showSymbol: false, smooth: true, lineStyle: { width: 1, color: '#f472b6' } },

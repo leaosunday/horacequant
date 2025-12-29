@@ -1,79 +1,64 @@
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
+  color-scheme: dark;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* 富途风格深色基调 */
+  --hq-bg: #0b0f14;
+  --hq-panel: rgba(255, 255, 255, 0.04);
+  --hq-border: rgba(255, 255, 255, 0.08);
+  --hq-text: rgba(255, 255, 255, 0.92);
+  --hq-subtext: rgba(255, 255, 255, 0.6);
+  --hq-muted: rgba(255, 255, 255, 0.42);
+  --hq-red: #ff4d4f;
+  --hq-green: #22c55e;
+  --hq-orange: #f59e0b;
+  --hq-blue: #60a5fa;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
+html,
+body,
+#app {
+  height: 100%;
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+  background: var(--hq-bg);
+  color: var(--hq-text);
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+/* Element Plus 视觉微调（暗色金融风） */
+.el-table {
+  --el-table-border-color: var(--hq-border);
+  --el-table-header-bg-color: rgba(255, 255, 255, 0.03);
+  --el-table-row-hover-bg-color: rgba(96, 165, 250, 0.08);
+  --el-fill-color-blank: transparent;
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+.el-table th.el-table__cell {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.78);
 }
 
-.card {
-  padding: 2em;
+.el-table .el-table__cell {
+  border-bottom: 1px solid var(--hq-border);
 }
 
-#app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+.el-input__wrapper,
+.el-date-editor {
+  background: rgba(255, 255, 255, 0.04) !important;
+  box-shadow: 0 0 0 1px var(--hq-border) inset !important;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+.el-input__inner {
+  color: var(--hq-text) !important;
+}
+
+.el-button--primary {
+  --el-color-primary: #3b82f6;
 }
