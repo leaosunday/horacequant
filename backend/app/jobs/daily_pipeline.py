@@ -157,7 +157,8 @@ async def run_daily_pipeline(db: Database, target_date: date, adjust: str = "qfq
                     py,
                     str(picker_script),
                     "--rule",
-                    str(rule_path.relative_to(root)),
+                    # 传绝对路径，避免调用方 cwd / 下游脚本 repo_root 探测差异导致的 backend/backend/... 问题
+                    str(rule_path),
                     "--rule-name",
                     strat,
                     "--trade-date",

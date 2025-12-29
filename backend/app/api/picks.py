@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, AsyncGenerator, Optional
 
 import pandas as pd
-from fastapi import APIRouter, Query, HTTPException, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -154,8 +154,9 @@ async def get_picks_bundle(
 
     try:
         picks = await picks_repo.list_picks(rule_name=rule_name, trade_date=td, limit=limit, cursor_code=cursor)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except FileNotFoundError:
+        # 该交易日还没跑出结果（或结果表未生成）：返回空列表，避免前端不停刷 404
+        picks = []
     next_cursor = picks[-1].code if picks else ""
 
     start = td - timedelta(days=window_days)
@@ -241,8 +242,8 @@ async def get_picks_bundle_stream(
     picks_repo = PicksRepo(db)
     try:
         picks = await picks_repo.list_picks(rule_name=rule_name, trade_date=td, limit=limit, cursor_code=cursor)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except FileNotFoundError:
+        picks = []
     next_cursor = picks[-1].code if picks else ""
 
     start = td - timedelta(days=window_days)

@@ -33,9 +33,40 @@ def _fmt() -> logging.Formatter:
     )
 
 
+class _SafeTimedRotatingFileHandler(TimedRotatingFileHandler):
+    """
+    TimedRotatingFileHandler 在滚动/清理旧文件时会 os.listdir(日志目录)；
+    若目录不存在（被删/未创建），会抛 FileNotFoundError 并导致 emit 失败（甚至影响 uvicorn.access）。
+    这里兜底：每次 emit/rollover 前确保目录存在。
+    """
+
+    def _ensure_dir(self) -> None:
+        try:
+            Path(self.baseFilename).parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._ensure_dir()
+        try:
+            super().emit(record)
+        except FileNotFoundError:
+            self._ensure_dir()
+            super().emit(record)
+
+    def doRollover(self) -> None:
+        self._ensure_dir()
+        try:
+            super().doRollover()
+        except FileNotFoundError:
+            self._ensure_dir()
+            super().doRollover()
+
+
 def _file_handler(path: Path, level: int, retention_days: int) -> TimedRotatingFileHandler:
     # 按天滚动；backupCount=保留天数（自动清理旧文件）
-    h = TimedRotatingFileHandler(
+    path.parent.mkdir(parents=True, exist_ok=True)
+    h = _SafeTimedRotatingFileHandler(
         filename=str(path),
         when="midnight",
         interval=1,

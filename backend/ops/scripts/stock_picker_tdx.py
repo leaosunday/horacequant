@@ -49,7 +49,17 @@ def find_repo_root() -> Path:
     """
     here = Path(__file__).resolve()
     for p in [here.parent] + list(here.parents):
-        if (p / ".git").exists() or (p / "backend" / "rules").is_dir() or (p / "rules").is_dir():
+        # 最优先：真正的项目根（含 .git）
+        if (p / ".git").exists():
+            return p
+        # 常规布局：<repo>/backend/rules
+        if (p / "backend" / "rules").is_dir():
+            return p
+        # 兼容旧布局：<repo>/rules
+        if (p / "rules").is_dir():
+            # 如果当前目录就是 backend/，其下 rules/ 存在但这并不是 repo root（会导致 backend/backend/...）
+            if p.name == "backend" and (p.parent / "backend" / "rules").is_dir():
+                return p.parent
             return p
     return Path.cwd()
 
@@ -666,6 +676,10 @@ def main() -> int:
     repo_root = find_repo_root()
     rule_path = Path(args.rule)
     if not rule_path.is_absolute():
+        # 兜底：如果用户传了 backend/rules/... 但 repo_root 被误判为 backend/，
+        # 则去掉前缀 backend，避免拼成 backend/backend/...
+        if repo_root.name == "backend" and rule_path.parts and rule_path.parts[0] == "backend":
+            rule_path = Path(*rule_path.parts[1:])
         rule_path = repo_root / rule_path
     if not rule_path.exists():
         raise SystemExit(f"规则文件不存在：{rule_path}")
