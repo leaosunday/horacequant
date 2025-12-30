@@ -37,6 +37,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import pandas as pd
 import psycopg2
 import psycopg2.extras
@@ -341,13 +342,24 @@ class TdxContext:
     def SMA(self, x: Value, n: Value, m: Value) -> pd.Series:
         n_int = int(float(n)) if not isinstance(n, pd.Series) else int(float(n.iloc[-1]))
         m_int = int(float(m)) if not isinstance(m, pd.Series) else int(float(m.iloc[-1]))
-        x_s = _as_series(x, self.index).astype(float)
+        x_s = _as_series(x, self.index).astype(float).replace([np.inf, -np.inf], np.nan)
         out = pd.Series(index=self.index, dtype="float64")
         if len(out) == 0:
             return out
-        out.iloc[0] = x_s.iloc[0]
+        # 通达信 SMA 语义（递推）：
+        # - 若上一期 SMA 为 NaN，则用当前 X 作为启动值（避免 NaN 污染整条序列）
+        # - 若当前 X 为 NaN，则沿用上一期 SMA
+        out.iloc[0] = x_s.iloc[0] if not pd.isna(x_s.iloc[0]) else np.nan
         for i in range(1, len(out)):
-            out.iloc[i] = (m_int * x_s.iloc[i] + (n_int - m_int) * out.iloc[i - 1]) / n_int
+            prev = out.iloc[i - 1]
+            xi = x_s.iloc[i]
+            if pd.isna(prev):
+                out.iloc[i] = xi if not pd.isna(xi) else np.nan
+                continue
+            if pd.isna(xi):
+                out.iloc[i] = prev
+                continue
+            out.iloc[i] = (m_int * xi + (n_int - m_int) * prev) / n_int
         return out
 
     def INBLOCK(self, block: Value) -> pd.Series:
