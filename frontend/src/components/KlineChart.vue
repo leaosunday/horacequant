@@ -56,7 +56,7 @@
         :class="['period-btn', { active: currentPeriod === period.value }]"
         @click="changePeriod(period.value)"
       >
-        <span class="period-label">{{ period.label }}</span>
+        {{ period.label }}
       </button>
     </div>
 
@@ -134,14 +134,18 @@ const currentPrice = computed(() => formatPrice(latestKline.value?.close))
 const priceChange = computed(() => {
   const latest = latestKline.value
   if (!latest || latest.close === null || latest.close === undefined) return '--'
-  const change = latest.change_amount ?? 0
-  const pct = latest.pct_change ?? 0
+  if (latest.pct_change === null || latest.pct_change === undefined) return '--'
+  if (latest.change_amount === null || latest.change_amount === undefined) return '--'
+  
+  const change = latest.change_amount
+  const pct = latest.pct_change
   const sign = change >= 0 ? '+' : ''
   return `${sign}${change.toFixed(2)} ${formatPercent(pct)}`
 })
 
 const priceClass = computed(() => {
-  const pct = latestKline.value?.pct_change || 0
+  const pct = latestKline.value?.pct_change
+  if (pct === null || pct === undefined) return 'neutral'
   return pct > 0 ? 'up' : pct < 0 ? 'down' : 'neutral'
 })
 
@@ -151,8 +155,8 @@ const open = computed(() => formatPrice(latestKline.value?.open))
 const preClose = computed(() => {
   const latest = latestKline.value
   if (!latest || latest.close === null || latest.close === undefined) return '--'
-  const change = latest.change_amount ?? 0
-  return formatPrice(latest.close - change)
+  if (latest.change_amount === null || latest.change_amount === undefined) return '--'
+  return formatPrice(latest.close - latest.change_amount)
 })
 
 const amount = computed(() => formatAmount(latestKline.value?.amount))
@@ -191,16 +195,12 @@ const renderChart = () => {
   const shortTrend = data.map(d => d.short_trend_line)
   const bullBear = data.map(d => d.bull_bear_line)
   
-  // 计算每个月第一个交易日的索引
-  const monthFirstIndices: number[] = []
-  let lastMonth = -1
-  dates.forEach((date, index) => {
-    const month = dayjs(date).month()
-    if (month !== lastMonth) {
-      monthFirstIndices.push(index)
-      lastMonth = month
-    }
-  })
+  // 计算默认显示60根K线的百分比
+  const totalBars = data.length
+  const displayBars = 60
+  const startPercent = totalBars > displayBars 
+    ? ((totalBars - displayBars) / totalBars) * 100 
+    : 0
 
   const option: echarts.EChartsOption = {
     backgroundColor: 'transparent',
@@ -220,18 +220,7 @@ const renderChart = () => {
         axisLabel: {
           color: '#8a8a8a',
           fontSize: 10,
-          interval: (index: number) => {
-            // 只在每月第一个交易日显示标签
-            return monthFirstIndices.includes(index)
-          },
-          formatter: (value: string, index: number) => {
-            // 第一个显示年份/月份
-            if (index === monthFirstIndices[0]) {
-              return dayjs(value).format('YYYY/MM')
-            }
-            // 其他月份只显示月份数字
-            return dayjs(value).format('M')
-          }
+          formatter: (value: string) => dayjs(value).format('MM/DD')
         },
         splitLine: { show: false },
         gridIndex: 0
@@ -259,18 +248,7 @@ const renderChart = () => {
         axisLabel: {
           color: '#8a8a8a',
           fontSize: 10,
-          interval: (index: number) => {
-            // 只在每月第一个交易日显示标签
-            return monthFirstIndices.includes(index)
-          },
-          formatter: (value: string, index: number) => {
-            // 第一个显示年份/月份
-            if (index === monthFirstIndices[0]) {
-              return dayjs(value).format('YYYY/MM')
-            }
-            // 其他月份只显示月份数字
-            return dayjs(value).format('M')
-          }
+          formatter: (value: string) => dayjs(value).format('MM/DD')
         },
         axisLine: { lineStyle: { color: '#3a3a3a' } },
         splitLine: { show: false }
@@ -318,13 +296,25 @@ const renderChart = () => {
       {
         type: 'inside',
         xAxisIndex: [0, 1, 2, 3],
-        startValue: data.length > 60 ? data.length - 60 : 0,
-        endValue: data.length - 1,
+        start: startPercent,
+        end: 100,
         moveOnMouseWheel: true,
         zoomOnMouseWheel: true,
-        minValueSpan: 10,
-        maxValueSpan: data.length
-      }
+      },
+      {
+        type: 'slider',
+        xAxisIndex: [0, 1, 2, 3],
+        bottom: '1%',
+        start: startPercent,
+        end: 100,
+        height: 20,
+        backgroundColor: '#1a1a1a',
+        fillerColor: 'rgba(58, 58, 58, 0.5)',
+        borderColor: '#3a3a3a',
+        handleStyle: { color: '#5a5a5a' },
+        textStyle: { color: '#8a8a8a' },
+      },
+
     ],
     series: [
       // K线
@@ -614,51 +604,43 @@ watch(() => [props.dailyData, props.weeklyData], () => {
 }
 
 .period-selector {
-  display: flex;
-  gap: 0;
+  display: inline-flex;
   margin-bottom: 12px;
-  justify-content: flex-start;
 }
 
 .period-btn {
-  padding: 0;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s;
-  position: relative;
-}
-
-.period-label {
-  display: inline-block;
-  padding: 3px 10px;
-  font-size: 11px;
-  color: #8a8a8a;
+  padding: 4px 12px;
   background: transparent;
   border: 1px solid #3a3a3a;
-  border-radius: 3px;
+  color: #8a8a8a;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 0;
   transition: all 0.2s;
+  margin-left: -1px;
 }
 
-.period-btn:first-child .period-label {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  border-right: none;
+.period-btn:first-child {
+  margin-left: 0;
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
 }
 
-.period-btn:last-child .period-label {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
+.period-btn:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
 }
 
-.period-btn:hover .period-label {
+.period-btn:hover {
   background-color: #1a1a1a;
 }
 
-.period-btn.active .period-label {
+.period-btn.active {
   background-color: #2a2a2a;
   color: #ffffff;
-  border-color: #2a2a2a;
+  border-color: #4a4a4a;
+  z-index: 1;
+  position: relative;
 }
 
 .chart-container {
