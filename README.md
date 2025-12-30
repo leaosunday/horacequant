@@ -23,8 +23,19 @@ horacequant/
     requirements.txt        # Python 依赖
     run.py                  # 启动 FastAPI
     worker.py               # 启动定时任务 Worker（APScheduler）
-  frontend/                 # 前端（Vue3 + Vite）
-  README.md
+  frontend/                 # 前端（Vue3 + TypeScript + Vite + ECharts）
+    src/                    # 源代码
+      api/                  # API 服务层
+      components/           # 可复用组件（K线图等）
+      views/                # 页面组件（列表、详情）
+      router/               # 路由配置
+      types/                # TypeScript 类型定义
+    package.json            # 依赖配置
+    vite.config.ts          # Vite 构建配置
+    README.md               # 前端文档
+  README.md                 # 项目总览（本文件）
+  FRONTEND_COMPLETE.md      # 前端完成报告
+  FRONTEND_USAGE.md         # 前端使用指南
 ```
 
 ---
@@ -45,7 +56,8 @@ pip install -r backend/requirements.txt
 
 ### 前端（Node.js）
 
-- Node.js 建议：18+（Vite 7 / Vue 3）
+- Node.js 建议：18+（Vue 3 + Vite 5 + TypeScript）
+- 技术栈：Vue 3 + Vue Router + ECharts 5 + Axios + Day.js
 - 安装依赖：
 
 ```bash
@@ -74,6 +86,15 @@ python backend/run.py
 cd frontend
 npm run dev
 ```
+
+浏览器访问：`http://localhost:5173`
+
+**功能特性：**
+- 📊 类富途 App 的 K线图展示（日K/周K切换）
+- 📈 技术指标：成交量、MACD、KDJ、ZX Short/Long 趋势线
+- 📱 响应式布局：PC端 1x2 网格，移动端 1x1 单列
+- 🚀 流式加载：支持 NDJSON 流式接口，边拉边画
+- 🎨 深色主题：专业交易界面风格
 
 ### 3) 启动定时任务 Worker（可选，但推荐）
 

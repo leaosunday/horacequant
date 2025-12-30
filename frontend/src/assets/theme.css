@@ -1,0 +1,107 @@
+/* 主题变量 */
+:root {
+  /* 背景色 */
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #0f0f0f;
+  --bg-tertiary: #1a1a1a;
+  --bg-hover: #2a2a2a;
+
+  /* 边框色 */
+  --border-primary: #1a1a1a;
+  --border-secondary: #3a3a3a;
+  --border-hover: #4a4a4a;
+
+  /* 文字色 */
+  --text-primary: #ffffff;
+  --text-secondary: #8a8a8a;
+  --text-tertiary: #5a5a5a;
+
+  /* 涨跌色 */
+  --color-up: #ee4b4b;
+  --color-down: #3dd598;
+  --color-neutral: #8a8a8a;
+
+  /* 指标颜色 */
+  --indicator-yellow: #ffd700;
+  --indicator-blue: #00bfff;
+  --indicator-pink: #ff69b4;
+  --indicator-orange: #ff8c00;
+
+  /* 圆角 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* 阴影 */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  /* 过渡 */
+  --transition-fast: 0.1s;
+  --transition-normal: 0.2s;
+  --transition-slow: 0.3s;
+}
+
+/* 全局样式增强 */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+/* 平滑滚动 */
+html {
+  scroll-behavior: smooth;
+}
+
+/* 选中文本样式 */
+::selection {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: var(--text-primary);
+}
+
+/* 禁用文本选择（某些UI元素） */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* 工具类 */
+.text-up {
+  color: var(--color-up);
+}
+
+.text-down {
+  color: var(--color-down);
+}
+
+.text-neutral {
+  color: var(--color-neutral);
+}
+
+/* 响应式工具类 */
+.mobile-only {
+  display: none;
+}
+
+.desktop-only {
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .mobile-only {
+    display: block;
+  }
+
+  .desktop-only {
+    display: none;
+  }
+}
+
