@@ -4,9 +4,27 @@
     <div class="header">
       <div class="header-content">
         <h1 class="title">HoraceQuant</h1>
-        <div class="rule-info">
-          <span class="rule-name">{{ ruleName }}</span>
-          <span class="trade-date">{{ formattedDate }}</span>
+        <div class="controls">
+          <div class="control-group">
+            <label>选股规则</label>
+            <input 
+              v-model="ruleName" 
+              type="text" 
+              class="rule-input"
+              placeholder="如: b1"
+              @keyup.enter="reloadData"
+            />
+          </div>
+          <div class="control-group">
+            <label>交易日期</label>
+            <input 
+              v-model="tradeDate" 
+              type="date" 
+              class="date-input"
+              @change="reloadData"
+            />
+          </div>
+          <button @click="reloadData" class="search-btn">查询</button>
         </div>
       </div>
     </div>
@@ -23,11 +41,11 @@
         v-for="item in items"
         :key="item.code"
         class="stock-card"
-        @click="goToDetail(item)"
       >
         <KlineChart
           :stock-code="item.code"
           :stock-name="item.name"
+          :exchange="item.exchange"
           :daily-data="item.daily"
           :weekly-data="item.weekly"
           :market-cap="item.market_cap"
@@ -52,27 +70,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
 import { fetchPicksStream } from '@/api'
 import type { PickBundleItem } from '@/types/api'
 import KlineChart from '@/components/KlineChart.vue'
 import dayjs from 'dayjs'
 
-const route = useRoute()
-const router = useRouter()
-
-const ruleName = ref(route.params.ruleName as string)
-const tradeDate = ref(route.params.tradeDate as string)
+// 默认值
+const ruleName = ref('b1')
+const tradeDate = ref(dayjs().format('YYYY-MM-DD'))
 
 const items = ref<PickBundleItem[]>([])
 const nextCursor = ref('')
 const loading = ref(false)
 const hasMore = ref(true)
-
-const formattedDate = computed(() => {
-  return dayjs(tradeDate.value).format('YYYY-MM-DD')
-})
 
 // 加载数据
 const loadData = async (cursor = '') => {
@@ -80,9 +91,12 @@ const loadData = async (cursor = '') => {
 
   loading.value = true
   try {
+    // 格式化日期为 YYYYMMDD
+    const formattedDate = tradeDate.value.replace(/-/g, '')
+    
     const stream = fetchPicksStream({
       ruleName: ruleName.value,
-      tradeDate: tradeDate.value,
+      tradeDate: formattedDate,
       limit: 20,
       cursor
     })
@@ -102,24 +116,19 @@ const loadData = async (cursor = '') => {
   }
 }
 
+// 重新加载数据（清空列表）
+const reloadData = () => {
+  items.value = []
+  nextCursor.value = ''
+  hasMore.value = true
+  loadData()
+}
+
 // 加载更多
 const loadMore = () => {
   if (nextCursor.value) {
     loadData(nextCursor.value)
   }
-}
-
-// 跳转到详情页
-const goToDetail = (item: PickBundleItem) => {
-  router.push({
-    name: 'StockDetail',
-    params: { code: item.code },
-    query: {
-      name: item.name,
-      ruleName: ruleName.value,
-      tradeDate: tradeDate.value
-    }
-  })
 }
 
 onMounted(() => {
@@ -150,28 +159,82 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 20px;
 }
 
 .title {
   font-size: 24px;
   font-weight: 600;
   margin: 0;
+  white-space: nowrap;
 }
 
-.rule-info {
+.controls {
   display: flex;
   gap: 12px;
-  font-size: 14px;
+  align-items: flex-end;
+  flex-wrap: wrap;
 }
 
-.rule-name {
-  padding: 4px 12px;
-  background-color: #1a1a1a;
-  border-radius: 4px;
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.trade-date {
+.control-group label {
+  font-size: 12px;
   color: #8a8a8a;
+}
+
+.rule-input,
+.date-input {
+  padding: 6px 12px;
+  background-color: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.rule-input {
+  width: 100px;
+}
+
+.date-input {
+  width: 150px;
+}
+
+.rule-input:focus,
+.date-input:focus {
+  border-color: #5a5a5a;
+  background-color: #2a2a2a;
+}
+
+.rule-input::placeholder {
+  color: #5a5a5a;
+}
+
+.search-btn {
+  padding: 6px 20px;
+  background-color: #3a3a3a;
+  border: 1px solid #5a5a5a;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.search-btn:hover {
+  background-color: #4a4a4a;
+  border-color: #6a6a6a;
+}
+
+.search-btn:active {
+  transform: scale(0.98);
 }
 
 .loading-container {
@@ -231,15 +294,8 @@ onMounted(() => {
   border: 1px solid #1a1a1a;
   border-radius: 8px;
   overflow: hidden;
-  cursor: pointer;
   transition: all 0.2s;
   min-height: 600px;
-}
-
-.stock-card:hover {
-  border-color: #3a3a3a;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .load-more {
@@ -288,11 +344,24 @@ onMounted(() => {
   .header-content {
     flex-direction: column;
     align-items: flex-start;
-    gap: 8px;
+    gap: 12px;
   }
 
   .title {
     font-size: 20px;
+  }
+
+  .controls {
+    width: 100%;
+  }
+
+  .control-group {
+    flex: 1;
+  }
+
+  .rule-input,
+  .date-input {
+    width: 100%;
   }
 
   .stocks-grid {

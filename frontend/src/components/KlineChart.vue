@@ -4,11 +4,7 @@
     <div class="stock-header">
       <div class="stock-title">
         <span class="stock-code">{{ stockCode }}</span>
-        <span class="stock-name">{{ stockName }}</span>
-      </div>
-      <div class="stock-status">
-        <span class="status-label">{{ statusLabel }}</span>
-        <span class="status-time">{{ statusTime }}</span>
+        <span class="stock-name">{{ stockName }} <span class="exchange">{{ exchange }}</span></span>
       </div>
     </div>
 
@@ -79,6 +75,7 @@ import dayjs from 'dayjs'
 interface Props {
   stockCode: string
   stockName: string
+  exchange: string
   dailyData: KlinePoint[]
   weeklyData: KlinePoint[]
   marketCap?: number | null
@@ -104,12 +101,6 @@ const currentData = computed(() => {
 const latestKline = computed(() => {
   const data = currentData.value
   return data && data.length > 0 ? data[data.length - 1] : null
-})
-
-// 前一根K线（用于计算涨跌）
-const prevKline = computed(() => {
-  const data = currentData.value
-  return data && data.length > 1 ? data[data.length - 2] : null
 })
 
 // 格式化价格
@@ -138,15 +129,6 @@ const formatMarketCap = (val: number | null | undefined): string => {
 }
 
 // 计算的值
-const statusLabel = computed(() => {
-  return currentPeriod.value === 'daily' ? '已收盘' : '已收盘'
-})
-
-const statusTime = computed(() => {
-  if (!latestKline.value) return ''
-  return dayjs(latestKline.value.trade_date).format('MM/DD HH:mm:ss')
-})
-
 const currentPrice = computed(() => formatPrice(latestKline.value?.close))
 
 const priceChange = computed(() => {
@@ -221,7 +203,6 @@ const renderChart = () => {
       {
         type: 'category',
         data: dates,
-        scale: true,
         boundaryGap: true,
         axisLine: { lineStyle: { color: '#3a3a3a' } },
         axisLabel: {
@@ -235,7 +216,6 @@ const renderChart = () => {
       {
         type: 'category',
         data: dates,
-        scale: true,
         gridIndex: 1,
         axisLabel: { show: false },
         axisLine: { show: false },
@@ -244,7 +224,6 @@ const renderChart = () => {
       {
         type: 'category',
         data: dates,
-        scale: true,
         gridIndex: 2,
         axisLabel: { show: false },
         axisLine: { show: false },
@@ -253,7 +232,6 @@ const renderChart = () => {
       {
         type: 'category',
         data: dates,
-        scale: true,
         gridIndex: 3,
         axisLabel: {
           color: '#8a8a8a',
@@ -307,7 +285,9 @@ const renderChart = () => {
         type: 'inside',
         xAxisIndex: [0, 1, 2, 3],
         start: 70,
-        end: 100
+        end: 100,
+        moveOnMouseWheel: true,
+        zoomOnMouseWheel: true,
       },
       {
         type: 'slider',
@@ -320,8 +300,9 @@ const renderChart = () => {
         fillerColor: 'rgba(58, 58, 58, 0.5)',
         borderColor: '#3a3a3a',
         handleStyle: { color: '#5a5a5a' },
-        textStyle: { color: '#8a8a8a' }
-      }
+        textStyle: { color: '#8a8a8a' },
+      },
+
     ],
     series: [
       // K线
@@ -524,15 +505,13 @@ watch(() => [props.dailyData, props.weeklyData], () => {
 
 .stock-name {
   font-size: 16px;
-  color: #8a8a8a;
+  color: #ffffff;
 }
 
-.stock-status {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+.exchange {
   font-size: 12px;
   color: #8a8a8a;
+  font-weight: 400;
 }
 
 .price-info {
@@ -614,20 +593,17 @@ watch(() => [props.dailyData, props.weeklyData], () => {
 
 .period-selector {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   margin-bottom: 12px;
-  padding: 4px;
-  background-color: #1a1a1a;
-  border-radius: 6px;
+  justify-content: flex-start;
 }
 
 .period-btn {
-  flex: 1;
-  padding: 6px 12px;
-  background: transparent;
-  border: none;
+  padding: 4px 12px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
   color: #8a8a8a;
-  font-size: 14px;
+  font-size: 12px;
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.2s;
@@ -635,11 +611,13 @@ watch(() => [props.dailyData, props.weeklyData], () => {
 
 .period-btn:hover {
   background-color: #2a2a2a;
+  border-color: #4a4a4a;
 }
 
 .period-btn.active {
   background-color: #3a3a3a;
   color: #ffffff;
+  border-color: #5a5a5a;
 }
 
 .chart-container {
