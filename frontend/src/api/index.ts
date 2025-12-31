@@ -40,7 +40,7 @@ export interface FetchPicksParams {
  * 获取选股结果（非流式）
  */
 export async function fetchPicks(params: FetchPicksParams): Promise<ApiResponse<PicksBundle>> {
-  const { ruleName, tradeDate, adjust = 'qfq', windowDays = 365, limit = 10, cursor = '' } = params
+  const { ruleName, tradeDate, adjust = 'qfq', windowDays = 730, limit = 10, cursor = '' } = params
   const response = await api.get<ApiResponse<PicksBundle>>(
     `/picks/${ruleName}/${tradeDate}`,
     {
@@ -54,7 +54,7 @@ export async function fetchPicks(params: FetchPicksParams): Promise<ApiResponse<
  * 获取选股结果（流式，NDJSON）
  */
 export async function* fetchPicksStream(params: FetchPicksParams): AsyncGenerator<StreamMessage> {
-  const { ruleName, tradeDate, adjust = 'qfq', windowDays = 365, limit = 50, cursor = '' } = params
+  const { ruleName, tradeDate, adjust = 'qfq', windowDays = 730, limit = 50, cursor = '' } = params
   
   const response = await fetch(
     `/api/v1/picks/${ruleName}/${tradeDate}/stream?adjust=${adjust}&window_days=${windowDays}&limit=${limit}&cursor=${cursor}`,

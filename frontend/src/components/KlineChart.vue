@@ -45,19 +45,18 @@
           <span class="label">总市值</span>
           <span class="value">{{ marketCap }}</span>
         </div>
+        <!-- 时间周期选择 -->
+        <div class="period-selector">
+          <button
+            v-for="period in periods"
+            :key="period.value"
+            :class="['period-btn', { active: currentPeriod === period.value }]"
+            @click="changePeriod(period.value)"
+          >
+            {{ period.label }}
+          </button>
+        </div>
       </div>
-    </div>
-
-    <!-- 时间周期选择 -->
-    <div class="period-selector">
-      <button
-        v-for="period in periods"
-        :key="period.value"
-        :class="['period-btn', { active: currentPeriod === period.value }]"
-        @click="changePeriod(period.value)"
-      >
-        {{ period.label }}
-      </button>
     </div>
 
     <!-- 图表容器 -->
@@ -285,6 +284,15 @@ const initChart = async () => {
     
     chartInstance = init(chartRef.value, {
       locale: 'zh-CN',
+      customApi: {
+        formatDate: (_dateTimeFormat: any, timestamp: number, _format: string) => {
+          const date = new Date(timestamp)
+          const year = date.getFullYear()
+          const month = String(date.getMonth() + 1).padStart(2, '0')
+          const day = String(date.getDate()).padStart(2, '0')
+          return `${year}-${month}-${day}`
+        }
+      },
       styles: {
         grid: {
           horizontal: {
@@ -472,7 +480,6 @@ watch(() => [props.dailyData, props.weeklyData], () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 12px;
 }
 
 .price-main {
@@ -542,12 +549,14 @@ watch(() => [props.dailyData, props.weeklyData], () => {
   gap: 16px;
   padding: 8px 0;
   border-top: 1px solid #1a1a1a;
+  border-bottom: 1px solid #1a1a1a;
 }
 
 .secondary-item {
   display: flex;
   gap: 8px;
   font-size: 12px;
+  align-items: center;
 }
 
 .secondary-item .label {
@@ -560,7 +569,8 @@ watch(() => [props.dailyData, props.weeklyData], () => {
 
 .period-selector {
   display: inline-flex;
-  margin-bottom: 12px;
+  margin-left: auto;
+  padding: 6px 56px;
 }
 
 .period-btn {
