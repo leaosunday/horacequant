@@ -17,15 +17,15 @@
       <div class="price-grid">
         <div class="price-item">
           <span class="label">最高</span>
-          <span class="value">{{ high }}</span>
+          <span class="value" :class="highClass">{{ high }}</span>
         </div>
         <div class="price-item">
           <span class="label">今开</span>
-          <span class="value">{{ open }}</span>
+          <span class="value" :class="openClass">{{ open }}</span>
         </div>
         <div class="price-item">
           <span class="label">最低</span>
-          <span class="value">{{ low }}</span>
+          <span class="value" :class="lowClass">{{ low }}</span>
         </div>
         <div class="price-item">
           <span class="label">昨收</span>
@@ -148,14 +148,39 @@ const priceClass = computed(() => {
   return pct > 0 ? 'up' : pct < 0 ? 'down' : 'neutral'
 })
 
+// 计算昨收价格（用于比较）
+const preCloseValue = computed(() => {
+  const latest = latestKline.value
+  if (!latest || latest.close === null || latest.close === undefined) return null
+  if (latest.change_amount === null || latest.change_amount === undefined) return null
+  return latest.close - latest.change_amount
+})
+
 const high = computed(() => formatPrice(latestKline.value?.high))
 const low = computed(() => formatPrice(latestKline.value?.low))
 const open = computed(() => formatPrice(latestKline.value?.open))
-const preClose = computed(() => {
-  const latest = latestKline.value
-  if (!latest || latest.close === null || latest.close === undefined) return '--'
-  if (latest.change_amount === null || latest.change_amount === undefined) return '--'
-  return formatPrice(latest.close - latest.change_amount)
+const preClose = computed(() => formatPrice(preCloseValue.value))
+
+// 计算最高、最低、今开的涨跌类名
+const highClass = computed(() => {
+  const highVal = latestKline.value?.high
+  const preCloseVal = preCloseValue.value
+  if (highVal === null || highVal === undefined || preCloseVal === null) return 'neutral'
+  return highVal > preCloseVal ? 'up' : highVal < preCloseVal ? 'down' : 'neutral'
+})
+
+const lowClass = computed(() => {
+  const lowVal = latestKline.value?.low
+  const preCloseVal = preCloseValue.value
+  if (lowVal === null || lowVal === undefined || preCloseVal === null) return 'neutral'
+  return lowVal > preCloseVal ? 'up' : lowVal < preCloseVal ? 'down' : 'neutral'
+})
+
+const openClass = computed(() => {
+  const openVal = latestKline.value?.open
+  const preCloseVal = preCloseValue.value
+  if (openVal === null || openVal === undefined || preCloseVal === null) return 'neutral'
+  return openVal > preCloseVal ? 'up' : openVal < preCloseVal ? 'down' : 'neutral'
 })
 
 const amount = computed(() => formatAmount(latestKline.value?.amount))
@@ -185,14 +210,19 @@ const convertToKLineData = (data: KlinePoint[]): KLineData[] => {
 }
 
 // 创建自定义指标 - ZX（包含 Short 和 Long 两条线）
+// Short 线使用 MA5 的颜色，Long 线使用 MA10 的颜色
 const createZXIndicator = () => {
+  // MA 默认颜色（与 KLineChart 内置的 MA 指标颜色一致）
+  const MA5_COLOR = '#FF6600'  // MA5 橙色
+  const MA10_COLOR = '#9D65C9' // MA10 紫色
+  
   return {
     name: 'ZX',
     shortName: 'ZX',
     calcParams: [],
     figures: [
-      { key: 'short', title: 'Short: ', type: 'line', color: '#ffd700' },
-      { key: 'long', title: 'Long: ', type: 'line', color: '#ff8c00' }
+      { key: 'short', title: 'Short: ', type: 'line', color: MA5_COLOR },
+      { key: 'long', title: 'Long: ', type: 'line', color: MA10_COLOR }
     ],
     calc: (kLineDataList: any[]) => {
       return kLineDataList.map(kLineData => {
@@ -206,42 +236,9 @@ const createZXIndicator = () => {
     },
     regenerateFigures: () => {
       return [
-        { key: 'short', title: 'Short: ', type: 'line', color: '#ffd700' },
-        { key: 'long', title: 'Long: ', type: 'line', color: '#ff8c00' }
+        { key: 'short', title: 'Short: ', type: 'line', color: MA5_COLOR },
+        { key: 'long', title: 'Long: ', type: 'line', color: MA10_COLOR }
       ]
-    },
-    shouldFormatBigNumber: true,
-    visible: true,
-    zLevel: 0,
-    createTooltipDataSource: ({ indicator }: any) => {
-      const result = indicator.result
-      if (!result || result.length === 0) {
-        return { name: 'ZX', calcParamsText: '', values: [] }
-      }
-      const lastData = result[result.length - 1]
-      const values = []
-      
-      if (lastData.short !== null && lastData.short !== undefined) {
-        values.push({ 
-          title: 'Short: ', 
-          value: lastData.short.toFixed(2),
-          color: '#ffd700'
-        })
-      }
-      
-      if (lastData.long !== null && lastData.long !== undefined) {
-        values.push({ 
-          title: 'Long: ', 
-          value: lastData.long.toFixed(2),
-          color: '#ff8c00'
-        })
-      }
-      
-      return {
-        name: 'ZX',
-        calcParamsText: '',
-        values
-      }
     }
   }
 }
@@ -287,6 +284,7 @@ const initChart = async () => {
     registerIndicator(createZXIndicator() as any)
     
     chartInstance = init(chartRef.value, {
+      locale: 'zh-CN',
       styles: {
         grid: {
           horizontal: {
@@ -294,6 +292,19 @@ const initChart = async () => {
           },
           vertical: {
             show: false
+          }
+        },
+        separator: {
+          size: 1,
+          color: '#2a2a2a'
+        },
+        indicator: {
+          tooltip: {
+            text: {
+              size: 12,
+              family: 'Helvetica Neue, Arial',
+              weight: 'normal'
+            }
           }
         },
         candle: {
@@ -379,6 +390,16 @@ const initChart = async () => {
     
     // 添加ZX指标到主图（包含 Short 和 Long 两条线）
     chartInstance.createIndicator('ZX', false, { id: 'candle_pane' })
+    
+    // 设置主图上的指标样式（确保ZX指标使用正确的颜色）
+    chartInstance.setStyles({
+      indicator: {
+        lines: [
+          { color: '#FF6600', size: 1 },  // Short - MA5 橙色
+          { color: '#9D65C9', size: 1 }   // Long - MA10 紫色
+        ]
+      }
+    }, 'candle_pane')
 
     // 延迟渲染，确保图表完全初始化
     setTimeout(() => {
@@ -501,6 +522,19 @@ watch(() => [props.dailyData, props.weeklyData], () => {
 .price-item .value {
   font-size: 14px;
   color: #ffffff;
+}
+
+/* 价格涨跌颜色需要覆盖默认白色 */
+.price-item .value.up {
+  color: #ee4b4b !important;
+}
+
+.price-item .value.down {
+  color: #3dd598 !important;
+}
+
+.price-item .value.neutral {
+  color: #8a8a8a !important;
 }
 
 .price-secondary {
