@@ -92,14 +92,14 @@ const periods = [
   { label: '周K', value: 'weekly' as const }
 ]
 
-// 当前显示的数据
+// 当前显示的数据（用于图表）
 const currentData = computed(() => {
   return currentPeriod.value === 'daily' ? props.dailyData : props.weeklyData
 })
 
-// 最新一根K线数据
+// 最新一根K线数据（固定使用日K数据，用于表头显示）
 const latestKline = computed(() => {
-  const data = currentData.value
+  const data = props.dailyData
   return data && data.length > 0 ? data[data.length - 1] : null
 })
 
