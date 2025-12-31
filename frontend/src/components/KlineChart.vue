@@ -67,10 +67,9 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import * as echarts from 'echarts'
-import type { ECharts } from 'echarts'
+import { init, dispose } from 'klinecharts'
+import type { KLineData } from 'klinecharts'
 import type { KlinePoint } from '@/types/api'
-import dayjs from 'dayjs'
 
 interface Props {
   stockCode: string
@@ -84,7 +83,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const chartRef = ref<HTMLDivElement>()
-let chartInstance: ECharts | null = null
+let chartInstance: any = null
 
 const currentPeriod = ref<'daily' | 'weekly'>('daily')
 const periods = [
@@ -166,6 +165,87 @@ const turnoverRate = computed(() => {
 })
 const marketCap = computed(() => formatMarketCap(props.marketCap))
 
+// 转换数据格式为 KLineChart 需要的格式
+const convertToKLineData = (data: KlinePoint[]): KLineData[] => {
+  return data.map(d => {
+    const timestamp = new Date(d.trade_date).getTime()
+    return {
+      timestamp,
+      open: Number(d.open) || 0,
+      high: Number(d.high) || 0,
+      low: Number(d.low) || 0,
+      close: Number(d.close) || 0,
+      volume: Number(d.volume) || 0,
+      turnover: Number(d.amount) || 0,
+      // 保存趋势线数据到扩展字段
+      shortTrendLine: d.short_trend_line,
+      bullBearLine: d.bull_bear_line
+    }
+  })
+}
+
+// 创建自定义指标 - ZX（包含 Short 和 Long 两条线）
+const createZXIndicator = () => {
+  return {
+    name: 'ZX',
+    shortName: 'ZX',
+    calcParams: [],
+    figures: [
+      { key: 'short', title: 'Short: ', type: 'line', color: '#ffd700' },
+      { key: 'long', title: 'Long: ', type: 'line', color: '#ff8c00' }
+    ],
+    calc: (kLineDataList: any[]) => {
+      return kLineDataList.map(kLineData => {
+        const shortValue = kLineData.shortTrendLine
+        const longValue = kLineData.bullBearLine
+        return {
+          short: (shortValue !== null && shortValue !== undefined && !isNaN(shortValue)) ? Number(shortValue) : null,
+          long: (longValue !== null && longValue !== undefined && !isNaN(longValue)) ? Number(longValue) : null
+        }
+      })
+    },
+    regenerateFigures: () => {
+      return [
+        { key: 'short', title: 'Short: ', type: 'line', color: '#ffd700' },
+        { key: 'long', title: 'Long: ', type: 'line', color: '#ff8c00' }
+      ]
+    },
+    shouldFormatBigNumber: true,
+    visible: true,
+    zLevel: 0,
+    createTooltipDataSource: ({ indicator }: any) => {
+      const result = indicator.result
+      if (!result || result.length === 0) {
+        return { name: 'ZX', calcParamsText: '', values: [] }
+      }
+      const lastData = result[result.length - 1]
+      const values = []
+      
+      if (lastData.short !== null && lastData.short !== undefined) {
+        values.push({ 
+          title: 'Short: ', 
+          value: lastData.short.toFixed(2),
+          color: '#ffd700'
+        })
+      }
+      
+      if (lastData.long !== null && lastData.long !== undefined) {
+        values.push({ 
+          title: 'Long: ', 
+          value: lastData.long.toFixed(2),
+          color: '#ff8c00'
+        })
+      }
+      
+      return {
+        name: 'ZX',
+        calcParamsText: '',
+        values
+      }
+    }
+  }
+}
+
 // 切换周期
 const changePeriod = (period: 'daily' | 'weekly') => {
   currentPeriod.value = period
@@ -174,299 +254,138 @@ const changePeriod = (period: 'daily' | 'weekly') => {
 
 // 渲染图表
 const renderChart = () => {
-  if (!chartInstance || !chartRef.value) return
+  if (!chartInstance) return
 
   const data = currentData.value
-  if (!data || data.length === 0) {
-    chartInstance.clear()
-    return
-  }
+  if (!data || data.length === 0) return
 
-  // 准备数据
-  const dates = data.map(d => d.trade_date)
-  const klineData = data.map(d => [d.open, d.close, d.low, d.high])
-  const volumes = data.map(d => d.volume || 0)
-  const macdDif = data.map(d => d.macd_dif)
-  const macdDea = data.map(d => d.macd_dea)
-  const macdHist = data.map(d => d.macd_hist)
-  const kdjK = data.map(d => d.kdj_k)
-  const kdjD = data.map(d => d.kdj_d)
-  const kdjJ = data.map(d => d.kdj_j)
-  const shortTrend = data.map(d => d.short_trend_line)
-  const bullBear = data.map(d => d.bull_bear_line)
+  const klineData = convertToKLineData(data)
   
-  // 计算默认显示60根K线的百分比
-  const totalBars = data.length
-  const displayBars = 60
-  const startPercent = totalBars > displayBars 
-    ? ((totalBars - displayBars) / totalBars) * 100 
-    : 0
-
-  const option: echarts.EChartsOption = {
-    backgroundColor: 'transparent',
-    animation: false,
-    grid: [
-      { left: '3%', right: '3%', top: '8%', height: '40%' }, // K线主图
-      { left: '3%', right: '3%', top: '52%', height: '12%' }, // 成交量
-      { left: '3%', right: '3%', top: '68%', height: '12%' }, // MACD
-      { left: '3%', right: '3%', top: '84%', height: '12%' }  // KDJ
-    ],
-    xAxis: [
-      {
-        type: 'category',
-        data: dates,
-        boundaryGap: true,
-        axisLine: { lineStyle: { color: '#3a3a3a' } },
-        axisLabel: {
-          color: '#8a8a8a',
-          fontSize: 10,
-          formatter: (value: string) => dayjs(value).format('MM/DD')
-        },
-        splitLine: { show: false },
-        gridIndex: 0
-      },
-      {
-        type: 'category',
-        data: dates,
-        gridIndex: 1,
-        axisLabel: { show: false },
-        axisLine: { show: false },
-        splitLine: { show: false }
-      },
-      {
-        type: 'category',
-        data: dates,
-        gridIndex: 2,
-        axisLabel: { show: false },
-        axisLine: { show: false },
-        splitLine: { show: false }
-      },
-      {
-        type: 'category',
-        data: dates,
-        gridIndex: 3,
-        axisLabel: {
-          color: '#8a8a8a',
-          fontSize: 10,
-          formatter: (value: string) => dayjs(value).format('MM/DD')
-        },
-        axisLine: { lineStyle: { color: '#3a3a3a' } },
-        splitLine: { show: false }
-      }
-    ],
-    yAxis: [
-      {
-        scale: true,
-        position: 'right',
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { color: '#8a8a8a', fontSize: 10 },
-        splitLine: { lineStyle: { color: '#1a1a1a' } },
-        gridIndex: 0
-      },
-      {
-        scale: true,
-        position: 'right',
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { color: '#8a8a8a', fontSize: 10 },
-        splitLine: { show: false },
-        gridIndex: 1
-      },
-      {
-        scale: true,
-        position: 'right',
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { color: '#8a8a8a', fontSize: 10 },
-        splitLine: { lineStyle: { color: '#1a1a1a' } },
-        gridIndex: 2
-      },
-      {
-        scale: true,
-        position: 'right',
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { color: '#8a8a8a', fontSize: 10 },
-        splitLine: { lineStyle: { color: '#1a1a1a' } },
-        gridIndex: 3
-      }
-    ],
-    dataZoom: [
-      {
-        type: 'inside',
-        xAxisIndex: [0, 1, 2, 3],
-        start: startPercent,
-        end: 100,
-        moveOnMouseWheel: true,
-        zoomOnMouseWheel: true,
-      },
-      {
-        type: 'slider',
-        xAxisIndex: [0, 1, 2, 3],
-        bottom: '1%',
-        start: startPercent,
-        end: 100,
-        height: 20,
-        backgroundColor: '#1a1a1a',
-        fillerColor: 'rgba(58, 58, 58, 0.5)',
-        borderColor: '#3a3a3a',
-        handleStyle: { color: '#5a5a5a' },
-        textStyle: { color: '#8a8a8a' },
-      },
-
-    ],
-    series: [
-      // K线
-      {
-        name: 'K线',
-        type: 'candlestick',
-        data: klineData,
-        xAxisIndex: 0,
-        yAxisIndex: 0,
-        itemStyle: {
-          color: '#ee4b4b',
-          color0: '#3dd598',
-          borderColor: '#ee4b4b',
-          borderColor0: '#3dd598'
-        }
-      },
-      // ZX SHORT (短期趋势线)
-      {
-        name: 'ZX SHORT',
-        type: 'line',
-        data: shortTrend,
-        xAxisIndex: 0,
-        yAxisIndex: 0,
-        smooth: true,
-        lineStyle: { color: '#ffd700', width: 1 },
-        showSymbol: false
-      },
-      // ZX LONG (多空线)
-      {
-        name: 'ZX LONG',
-        type: 'line',
-        data: bullBear,
-        xAxisIndex: 0,
-        yAxisIndex: 0,
-        smooth: true,
-        lineStyle: { color: '#ff8c00', width: 1 },
-        showSymbol: false
-      },
-      // 成交量
-      {
-        name: '成交量',
-        type: 'bar',
-        data: volumes.map((vol, idx) => {
-          const kline = data[idx]
-          const color = (kline.close || 0) >= (kline.open || 0) ? '#ee4b4b' : '#3dd598'
-          return { value: vol, itemStyle: { color } }
-        }),
-        xAxisIndex: 1,
-        yAxisIndex: 1,
-        barWidth: '60%'
-      },
-      // MACD DIF
-      {
-        name: 'DIF',
-        type: 'line',
-        data: macdDif,
-        xAxisIndex: 2,
-        yAxisIndex: 2,
-        smooth: false,
-        lineStyle: { color: '#ffd700', width: 1 },
-        showSymbol: false
-      },
-      // MACD DEA
-      {
-        name: 'DEA',
-        type: 'line',
-        data: macdDea,
-        xAxisIndex: 2,
-        yAxisIndex: 2,
-        smooth: false,
-        lineStyle: { color: '#00bfff', width: 1 },
-        showSymbol: false
-      },
-      // MACD HIST
-      {
-        name: 'MACD',
-        type: 'bar',
-        data: macdHist.map(val => {
-          const color = (val || 0) >= 0 ? '#ee4b4b' : '#3dd598'
-          return { value: val, itemStyle: { color } }
-        }),
-        xAxisIndex: 2,
-        yAxisIndex: 2,
-        barWidth: '60%'
-      },
-      // KDJ K
-      {
-        name: 'K',
-        type: 'line',
-        data: kdjK,
-        xAxisIndex: 3,
-        yAxisIndex: 3,
-        smooth: false,
-        lineStyle: { color: '#ffd700', width: 1 },
-        showSymbol: false
-      },
-      // KDJ D
-      {
-        name: 'D',
-        type: 'line',
-        data: kdjD,
-        xAxisIndex: 3,
-        yAxisIndex: 3,
-        smooth: false,
-        lineStyle: { color: '#00bfff', width: 1 },
-        showSymbol: false
-      },
-      // KDJ J
-      {
-        name: 'J',
-        type: 'line',
-        data: kdjJ,
-        xAxisIndex: 3,
-        yAxisIndex: 3,
-        smooth: false,
-        lineStyle: { color: '#ff69b4', width: 1 },
-        showSymbol: false
-      }
-    ],
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: {
-        type: 'cross',
-        lineStyle: { color: '#5a5a5a' }
-      },
-      backgroundColor: 'rgba(26, 26, 26, 0.95)',
-      borderColor: '#3a3a3a',
-      textStyle: { color: '#ffffff', fontSize: 12 }
-    },
-    legend: {
-      show: false
-    }
+  try {
+    chartInstance.applyNewData(klineData)
+    
+    // 滚动到最新数据并设置默认显示90根K线
+    setTimeout(() => {
+      chartInstance.scrollToRealTime()
+      // 设置显示最后90根K线
+      const barCount = Math.min(90, klineData.length)
+      chartInstance.setBarSpace(chartRef.value!.offsetWidth / barCount)
+    }, 100)
+  } catch (e) {
+    console.error('Failed to render chart:', e)
   }
-
-  chartInstance.setOption(option, true)
 }
 
 // 初始化图表
-const initChart = () => {
+const initChart = async () => {
   if (!chartRef.value) return
 
-  chartInstance = echarts.init(chartRef.value)
-  renderChart()
+  try {
+    // 注册自定义指标
+    const klinecharts = await import('klinecharts')
+    const { registerIndicator } = klinecharts
+    registerIndicator(createZXIndicator() as any)
+    
+    chartInstance = init(chartRef.value, {
+      styles: {
+        grid: {
+          horizontal: {
+            color: '#1a1a1a'
+          },
+          vertical: {
+            show: false
+          }
+        },
+        candle: {
+          bar: {
+            upColor: '#ee4b4b',
+            downColor: '#3dd598',
+            noChangeColor: '#8a8a8a',
+            upBorderColor: '#ee4b4b',
+            downBorderColor: '#3dd598',
+            noChangeBorderColor: '#8a8a8a',
+            upWickColor: '#ee4b4b',
+            downWickColor: '#3dd598',
+            noChangeWickColor: '#8a8a8a'
+          },
+          priceMark: {
+            high: {
+              color: '#ee4b4b'
+            },
+            low: {
+              color: '#3dd598'
+            },
+            last: {
+              upColor: '#ee4b4b',
+              downColor: '#3dd598',
+              noChangeColor: '#8a8a8a',
+              text: {
+                color: '#ffffff'
+              }
+            }
+          }
+        },
+        xAxis: {
+          axisLine: {
+            color: '#3a3a3a'
+          },
+          tickText: {
+            color: '#8a8a8a',
+            size: 10
+          }
+        },
+        yAxis: {
+          axisLine: {
+            color: '#3a3a3a'
+          },
+          tickText: {
+            color: '#8a8a8a',
+            size: 10
+          }
+        },
+        crosshair: {
+          horizontal: {
+            line: {
+              color: '#5a5a5a'
+            },
+            text: {
+              color: '#ffffff',
+              backgroundColor: '#2a2a2a'
+            }
+          },
+          vertical: {
+            line: {
+              color: '#5a5a5a'
+            },
+            text: {
+              color: '#ffffff',
+              backgroundColor: '#2a2a2a'
+            }
+          }
+        }
+      }
+    } as any)
 
-  // 响应式
-  const resizeObserver = new ResizeObserver(() => {
-    chartInstance?.resize()
-  })
-  resizeObserver.observe(chartRef.value)
+    if (!chartInstance) return
 
-  return () => {
-    resizeObserver.disconnect()
+    // 创建副图 - 成交量（指定固定高度）
+    chartInstance.createIndicator('VOL', true, { height: 100 })
+    
+    // 创建副图 - MACD
+    chartInstance.createIndicator('MACD', true, { height: 100 })
+    
+    // 创建副图 - KDJ
+    chartInstance.createIndicator('KDJ', true, { height: 100 })
+    
+    // 添加ZX指标到主图（包含 Short 和 Long 两条线）
+    chartInstance.createIndicator('ZX', false, { id: 'candle_pane' })
+
+    // 延迟渲染，确保图表完全初始化
+    setTimeout(() => {
+      renderChart()
+    }, 100)
+  } catch (e) {
+    console.error('Failed to init chart:', e)
   }
 }
 
@@ -476,8 +395,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  chartInstance?.dispose()
-  chartInstance = null
+  if (chartInstance && chartRef.value) {
+    dispose(chartRef.value)
+    chartInstance = null
+  }
 })
 
 // 监听数据变化
@@ -645,7 +566,8 @@ watch(() => [props.dailyData, props.weeklyData], () => {
 
 .chart-container {
   flex: 1;
-  min-height: 500px;
+  min-height: 700px;
+  height: 700px;
 }
 
 /* 移动端适配 */
@@ -679,4 +601,3 @@ watch(() => [props.dailyData, props.weeklyData], () => {
   }
 }
 </style>
-

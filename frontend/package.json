@@ -11,7 +11,7 @@
     "vue": "^3.4.21",
     "vue-router": "^4.3.0",
     "axios": "^1.6.7",
-    "echarts": "^5.5.0",
+    "klinecharts": "^9.8.7",
     "dayjs": "^1.11.10"
   },
   "devDependencies": {
