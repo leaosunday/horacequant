@@ -197,6 +197,7 @@ onMounted(() => {
   font-size: 14px;
   outline: none;
   transition: all 0.2s;
+  color-scheme: dark;
 }
 
 .rule-input {

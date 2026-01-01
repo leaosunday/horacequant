@@ -212,7 +212,7 @@ const convertToKLineData = (data: KlinePoint[]): KLineData[] => {
 // Short 线使用 MA5 的颜色，Long 线使用 MA10 的颜色
 const createZXIndicator = () => {
   // MA 默认颜色（与 KLineChart 内置的 MA 指标颜色一致）
-  const MA5_COLOR = '#FF6600'  // MA5 橙色
+  const MA5_COLOR = '#FFD700'  // MA5 金色
   const MA10_COLOR = '#9D65C9' // MA10 紫色
   
   return {
@@ -329,6 +329,7 @@ const initChart = async () => {
           }]
         },
         candle: {
+          type: 'candle_up_stroke',
           bar: {
             upColor: '#ee4b4b',
             downColor: '#3dd598',
@@ -416,7 +417,7 @@ const initChart = async () => {
     chartInstance.setStyles({
       indicator: {
         lines: [
-          { color: '#FF6600', size: 1 },  // Short - MA5 橙色
+          { color: '#FFD700', size: 1 },  // Short - MA5 金色
           { color: '#9D65C9', size: 1 }   // Long - MA10 紫色
         ]
       }
