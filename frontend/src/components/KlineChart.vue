@@ -313,7 +313,20 @@ const initChart = async () => {
               family: 'Helvetica Neue, Arial',
               weight: 'normal'
             }
-          }
+          },
+          bars: [{
+            upColor: '#ee4b4b',           // 上涨柱红色
+            downColor: '#3dd598',          // 下跌柱绿色
+            noChangeColor: '#8a8a8a',
+            upBorderColor: '#ee4b4b',
+            downBorderColor: '#3dd598',
+            noChangeBorderColor: '#8a8a8a'
+          }],
+          circles: [{
+            upColor: '#ee4b4b',           // 上涨圆点红色
+            downColor: '#3dd598',          // 下跌圆点绿色
+            noChangeColor: '#8a8a8a'
+          }]
         },
         candle: {
           bar: {
