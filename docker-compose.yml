@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: horacequant-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: horace_quant
+    ports:
+      - "14786:5432"
+    volumes:
+      - horace_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d horace_quant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: horacequant-backend
+    environment:
+      - HQ_ENV=prod
+      - HQ_PG_HOST=db
+      - HQ_PG_PORT=5432
+      - HQ_PG_USER=postgres
+      - HQ_PG_PASSWORD=postgrespassword
+      - HQ_PG_DB=horace_quant
+      - HQ_ALLOWED_HOSTS=*
+      - HQ_CORS_ENABLED=true
+      - HQ_LOG_DIR=/app/backend/logs
+    ports:
+      - "14703:8000"
+    volumes:
+      - ./backend/logs:/app/backend/logs
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: horacequant-frontend
+    ports:
+      - "14702:80"
+    depends_on:
+      - backend
+
+volumes:
+  horace_db_data:

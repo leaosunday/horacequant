@@ -19,6 +19,65 @@ class IndicatorsRepo:
         self.db = db
 
     async def ensure_schema(self) -> None:
+        # 基础表
+        await self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stock_basic (
+              code        CHAR(6) PRIMARY KEY,
+              name        TEXT NOT NULL,
+              exchange    CHAR(2) NOT NULL,
+              ak_symbol   TEXT NOT NULL,
+              updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+
+        # 日线数据表
+        await self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stock_daily (
+              code          CHAR(6) NOT NULL REFERENCES stock_basic(code),
+              trade_date    DATE NOT NULL,
+              open          NUMERIC(18, 4),
+              high          NUMERIC(18, 4),
+              low           NUMERIC(18, 4),
+              close         NUMERIC(18, 4),
+              volume        BIGINT,
+              amount        NUMERIC(20, 2),
+              amplitude     NUMERIC(10, 4),
+              pct_change    NUMERIC(10, 4),
+              change_amount NUMERIC(18, 4),
+              turnover_rate NUMERIC(10, 4),
+              adjust        TEXT NOT NULL DEFAULT '',
+              PRIMARY KEY (code, trade_date, adjust)
+            );
+            """
+        )
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_stock_daily_trade_date ON stock_daily(trade_date);")
+
+        # 周线数据表
+        await self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stock_weekly (
+              code          CHAR(6) NOT NULL REFERENCES stock_basic(code),
+              trade_date    DATE NOT NULL,
+              open          NUMERIC(18, 4),
+              high          NUMERIC(18, 4),
+              low           NUMERIC(18, 4),
+              close         NUMERIC(18, 4),
+              volume        BIGINT,
+              amount        NUMERIC(20, 2),
+              amplitude     NUMERIC(10, 4),
+              pct_change    NUMERIC(10, 4),
+              change_amount NUMERIC(18, 4),
+              turnover_rate NUMERIC(10, 4),
+              adjust        TEXT NOT NULL DEFAULT '',
+              PRIMARY KEY (code, trade_date, adjust)
+            );
+            """
+        )
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_stock_weekly_trade_date ON stock_weekly(trade_date);")
+
         # 日线指标
         await self.db.execute(
             """

@@ -50,14 +50,17 @@ def create_app() -> FastAPI:
         )
         await db.connect()
         app.state.db = db
+
+        # 必须先执行 ind_repo.ensure_schema()，因为它负责创建 stock_basic 等基础表
+        # 否则 mc_repo.ensure_schema() 会因为外键引用不存在而报错
+        ind_repo = IndicatorsRepo(db)
+        await ind_repo.ensure_schema()
+        app.state.indicators_repo = ind_repo
+
         # 初始化并确保缓存表存在
         mc_repo = MarketCapRepo(db)
         await mc_repo.ensure_schema()
         app.state.market_cap = MarketCapService(repo=mc_repo)
-
-        ind_repo = IndicatorsRepo(db)
-        await ind_repo.ensure_schema()
-        app.state.indicators_repo = ind_repo
 
         # 启动定时任务（生产环境建议单独跑 worker；这里先内置，便于开发/测试）
         app.state.scheduler = start_scheduler(db)
