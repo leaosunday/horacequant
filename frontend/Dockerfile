@@ -1,5 +1,5 @@
 # 构建阶段
-FROM node:25-slim as build-stage
+FROM node:20 as build-stage
 
 WORKDIR /app
 
@@ -7,12 +7,13 @@ WORKDIR /app
 COPY package*.json ./
 
 # 安装依赖
+# 使用 --include=dev 确保 vite 等构建工具被安装
 RUN npm install
 
 # 复制源代码
 COPY . .
 
-# 构建应用
+# 执行构建
 RUN npm run build
 
 # 生产阶段
