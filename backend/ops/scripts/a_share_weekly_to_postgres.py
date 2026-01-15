@@ -50,11 +50,11 @@ class PgConfig:
 
 def load_pg_config() -> PgConfig:
     return PgConfig(
-        host=os.getenv("PG_HOST", "127.0.0.1"),
-        port=int(os.getenv("PG_PORT", "5432")),
-        user=os.getenv("PG_USER", getpass.getuser()),
-        password=os.getenv("PG_PASSWORD", ""),
-        dbname=os.getenv("PG_DB", "horace_quant"),
+        host=os.getenv("HQ_PG_HOST", "127.0.0.1"),
+        port=int(os.getenv("HQ_PG_PORT", "5432")),
+        user=os.getenv("HQ_PG_USER", getpass.getuser()),
+        password=os.getenv("HQ_PG_PASSWORD", ""),
+        dbname=os.getenv("HQ_PG_DB", "horace_quant"),
     )
 
 

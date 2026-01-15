@@ -57,13 +57,13 @@ def _env(name: str, default: Optional[str] = None) -> str:
 
 def load_pg_config() -> PgConfig:
     return PgConfig(
-        host=_env("PG_HOST", "127.0.0.1"),
-        port=int(_env("PG_PORT", "5432")),
+        host=_env("HQ_PG_HOST", "127.0.0.1"),
+        port=int(_env("HQ_PG_PORT", "5432")),
         # macOS/Homebrew 常见默认角色是当前系统用户名；因此默认用 getpass.getuser()
-        user=_env("PG_USER", getpass.getuser()),
+        user=_env("HQ_PG_USER", getpass.getuser()),
         # 密码允许为空（例如本地 trust / peer 认证，或你自己用 .pgpass 管理）
-        password=os.getenv("PG_PASSWORD", ""),
-        dbname=_env("PG_DB", "horace_quant"),
+        password=os.getenv("HQ_PG_PASSWORD", ""),
+        dbname=_env("HQ_PG_DB", "horace_quant"),
     )
 
 
@@ -82,8 +82,8 @@ def ensure_database(cfg: PgConfig) -> None:
     创建数据库（若不存在）。
     注意：需要用户有 CREATEDB 权限；否则请手工建库再运行。
     """
-    # 先连接管理库（可通过 PG_ADMIN_DB 覆盖），并带 template1 兜底
-    admin_db = os.getenv("PG_ADMIN_DB", "postgres")
+    # 先连接管理库（可通过 HQ_PG_ADMIN_DB 覆盖），并带 template1 兜底
+    admin_db = os.getenv("HQ_PG_ADMIN_DB", "postgres")
     last_err: Optional[Exception] = None
     for db in (admin_db, "template1"):
         try:
