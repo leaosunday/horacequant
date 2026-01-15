@@ -8,7 +8,7 @@ services:
       - POSTGRES_DB=horace_quant
       - TZ=Asia/Shanghai
     volumes:
-      - horace_db_data:/var/lib/postgresql/data
+      - horacequant_db:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d horace_quant"]
       interval: 10s
