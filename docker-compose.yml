@@ -3,11 +3,12 @@ services:
     image: postgres:18-alpine
     container_name: horacequant-db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: horace_quant
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgrespassword
+      - POSTGRES_DB=horace_quant
+      - TZ=Asia/Shanghai
     volumes:
-      - horacequant_db:/var/lib/postgresql/data
+      - horace_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d horace_quant"]
       interval: 10s
@@ -20,6 +21,7 @@ services:
       dockerfile: Dockerfile
     container_name: horacequant-backend
     environment:
+      - TZ=Asia/Shanghai
       - HQ_ENV=prod
       - HQ_PG_HOST=db
       - HQ_PG_PORT=5432
@@ -40,6 +42,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: horacequant-frontend
+    environment:
+      - TZ=Asia/Shanghai
     ports:
       - "14702:80"
     depends_on:

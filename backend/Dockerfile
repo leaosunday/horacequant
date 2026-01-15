@@ -1,12 +1,13 @@
 FROM python:3.12-slim
 
-WORKDIR /app
-
-# 安装必要的系统依赖（如果 akshare 需要）
+# 安装 tzdata 以支持时区设置
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
     gcc \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
 
 # 复制依赖文件并安装
 COPY requirements.txt .
