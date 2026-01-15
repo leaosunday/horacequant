@@ -4,14 +4,14 @@ D:=SMA(K,3,1);
 J:=3*K-2*D;
 
 短期趋势线:=EMA(EMA(C,10),10);
-知行多空线:=(MA(CLOSE,14)+MA(CLOSE,28)+MA(CLOSE,57)+MA(CLOSE,114))/4;振幅 := (HIGH - LOW) / REF(CLOSE, 1) * 100;涨跌幅 := (CLOSE - REF(CLOSE, 1)) / REF(CLOSE, 1) * 100;
+知行多空线:=(MA(CLOSE,14)+MA(CLOSE,28)+MA(CLOSE,57)+MA(CLOSE,114))/4;
+
+振幅 := (HIGH - LOW) / REF(CLOSE, 1) * 100;
+涨跌幅 := (CLOSE - REF(CLOSE, 1)) / REF(CLOSE, 1) * 100;
 
 剔除创业板 := NOT(INBLOCK('创业板'));
-
 剔除科创 := NOT(INBLOCK('科创板'));
-
 剔除北证 := NOT(INBLOCK('北证A股'));
-
 剔除ST := NOT(NAMELIKE('ST') OR NAMELIKE('*ST') OR NAMELIKE('SST') OR NAMELIKE('S*ST'));
 
 选股条件:

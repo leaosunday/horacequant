@@ -1,0 +1,33 @@
+RSV:=(CLOSE-LLV(LOW,9))/(HHV(HIGH,9)-LLV(LOW,9))*100;
+K:=SMA(RSV,3,1);
+D:=SMA(K,3,1);
+J:=3*K-2*D;
+RSV1:=(REF(CLOSE, 1)-LLV(REF(LOW, 1),9))/(HHV(REF(HIGH, 1),9)-LLV(REF(LOW, 1),9))*100;
+K1:=SMA(RSV1,3,1);
+D1:=SMA(K1,3,1);
+J1:=3*K1-2*D1;
+
+短期趋势线:=EMA(EMA(REF(C, 1),10),10);
+知行多空线:=(MA(REF(CLOSE, 1),14)+MA(REF(CLOSE, 1),28)+MA(REF(CLOSE, 1),57)+MA(REF(CLOSE, 1),114))/4;
+
+振幅 := (HIGH - LOW) / REF(CLOSE, 1) * 100;
+涨跌幅 := (CLOSE - REF(CLOSE, 1)) / REF(CLOSE, 1) * 100;
+振幅1 := (REF(HIGH, 1) - REF(LOW, 1)) / REF(CLOSE, 2) * 100;
+涨跌幅1 := (REF(CLOSE, 1) - REF(CLOSE, 2)) / REF(CLOSE, 2) * 100;
+
+剔除创业板 := NOT(INBLOCK('创业板'));
+剔除科创 := NOT(INBLOCK('科创板'));
+剔除北证 := NOT(INBLOCK('北证A股'));
+
+选股条件:
+J1 <= 13 AND 
+短期趋势线 > 知行多空线 AND 
+REF(CLOSE, 1) >= 知行多空线 AND
+振幅1 <= 4 AND 
+涨跌幅1 >= -2 AND 涨跌幅1 <= 1.8 AND
+J <= 80 AND
+涨跌幅 >= 4 AND
+VOL >= REF(VOL, 1) AND
+剔除创业板 AND 
+剔除科创 AND 
+剔除北证;
