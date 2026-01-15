@@ -6,10 +6,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgrespassword
       POSTGRES_DB: horace_quant
-    ports:
-      - "14786:5432"
     volumes:
-      - horace_db_data:/var/lib/postgresql/data
+      - horacequant_db:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d horace_quant"]
       interval: 10s
@@ -31,8 +29,6 @@ services:
       - HQ_ALLOWED_HOSTS=*
       - HQ_CORS_ENABLED=true
       - HQ_LOG_DIR=/app/backend/logs
-    ports:
-      - "14703:8000"
     volumes:
       - ./backend/logs:/app/backend/logs
     depends_on:
@@ -50,4 +46,4 @@ services:
       - backend
 
 volumes:
-  horace_db_data:
+  horacequant_db:
