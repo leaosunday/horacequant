@@ -109,15 +109,16 @@ async def run_daily_pipeline(db: Database, target_date: date, adjust: str = "qfq
         py = sys.executable
         env = os.environ.copy()
 
-        # 1) 日K：只拉当天
+        # 1) 日K：拉取最近两天（含当天），用于自动对齐可能遗漏的数据
         try:
             daily_script = broot / "ops" / "scripts" / "a_share_daily_to_postgres.py"
+            start_daily = (target_date - timedelta(days=1)).strftime("%Y%m%d")
             await run_cmd(
                 [
                     py,
                     str(daily_script),
                     "--start-date",
-                    target_date.strftime("%Y%m%d"),
+                    start_daily,
                     "--end-date",
                     target_date.strftime("%Y%m%d"),
                     "--adjust",
@@ -126,7 +127,7 @@ async def run_daily_pipeline(db: Database, target_date: date, adjust: str = "qfq
                 cwd=root,
                 env=env,
             )
-            logger.info("Stage 1/3: Daily K-line sync success. date=%s", target_date)
+            logger.info("Stage 1/3: Daily K-line sync success (last 2 days). date=%s", target_date)
         except Exception as e:
             logger.error("Stage 1/3: Daily K-line sync failed. date=%s err=%s", target_date, e)
 
