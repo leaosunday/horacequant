@@ -110,65 +110,76 @@ async def run_daily_pipeline(db: Database, target_date: date, adjust: str = "qfq
         env = os.environ.copy()
 
         # 1) 日K：只拉当天
-        daily_script = broot / "ops" / "scripts" / "a_share_daily_to_postgres.py"
-        await run_cmd(
-            [
-                py,
-                str(daily_script),
-                "--start-date",
-                target_date.strftime("%Y%m%d"),
-                "--end-date",
-                target_date.strftime("%Y%m%d"),
-                "--adjust",
-                adjust,
-            ],
-            cwd=root,
-            env=env,
-        )
-
-        # 2) 周K：只需要覆盖近 30 天以包含当周
-        weekly_script = broot / "ops" / "scripts" / "a_share_weekly_to_postgres.py"
-        start_weekly = (target_date - timedelta(days=30)).strftime("%Y%m%d")
-        await run_cmd(
-            [
-                py,
-                str(weekly_script),
-                "--start-date",
-                start_weekly,
-                "--end-date",
-                target_date.strftime("%Y%m%d"),
-                "--adjust",
-                adjust,
-            ],
-            cwd=root,
-            env=env,
-        )
-
-        # 3) 选股：遍历策略列表（复用 ops 脚本，保证公式一致）
-        picker_script = broot / "ops" / "scripts" / "stock_picker_tdx.py"
-        strategies = list(getattr(settings, "strategies", ["b1"])) or ["b1"]
-        for strat in strategies:
-            rule_path = broot / "rules" / f"{strat}.tdx"
-            if not rule_path.exists():
-                logger.warning("Strategy rule file not found, skip. strategy=%s path=%s", strat, rule_path)
-                continue
+        try:
+            daily_script = broot / "ops" / "scripts" / "a_share_daily_to_postgres.py"
             await run_cmd(
                 [
                     py,
-                    str(picker_script),
-                    "--rule",
-                    # 传绝对路径，避免调用方 cwd / 下游脚本 repo_root 探测差异导致的 backend/backend/... 问题
-                    str(rule_path),
-                    "--rule-name",
-                    strat,
-                    "--trade-date",
-                    target_date.strftime("%Y-%m-%d"),
+                    str(daily_script),
+                    "--start-date",
+                    target_date.strftime("%Y%m%d"),
+                    "--end-date",
+                    target_date.strftime("%Y%m%d"),
+                    "--adjust",
+                    adjust,
                 ],
                 cwd=root,
                 env=env,
             )
+            logger.info("Stage 1/3: Daily K-line sync success. date=%s", target_date)
+        except Exception as e:
+            logger.error("Stage 1/3: Daily K-line sync failed. date=%s err=%s", target_date, e)
 
-        logger.info("Daily pipeline done. date=%s adjust=%s", target_date, adjust)
+        # 2) 周K：只需要覆盖近 30 天以包含当周
+        try:
+            weekly_script = broot / "ops" / "scripts" / "a_share_weekly_to_postgres.py"
+            start_weekly = (target_date - timedelta(days=30)).strftime("%Y%m%d")
+            await run_cmd(
+                [
+                    py,
+                    str(weekly_script),
+                    "--start-date",
+                    start_weekly,
+                    "--end-date",
+                    target_date.strftime("%Y%m%d"),
+                    "--adjust",
+                    adjust,
+                ],
+                cwd=root,
+                env=env,
+            )
+            logger.info("Stage 2/3: Weekly K-line sync success. date=%s", target_date)
+        except Exception as e:
+            logger.error("Stage 2/3: Weekly K-line sync failed. date=%s err=%s", target_date, e)
+
+        # 3) 选股：遍历策略列表
+        picker_script = broot / "ops" / "scripts" / "stock_picker_tdx.py"
+        strategies = list(getattr(settings, "strategies", ["b1"])) or ["b1"]
+        for strat in strategies:
+            try:
+                rule_path = broot / "rules" / f"{strat}.tdx"
+                if not rule_path.exists():
+                    logger.warning("Strategy rule file not found, skip. strategy=%s path=%s", strat, rule_path)
+                    continue
+                await run_cmd(
+                    [
+                        py,
+                        str(picker_script),
+                        "--rule",
+                        str(rule_path),
+                        "--rule-name",
+                        strat,
+                        "--trade-date",
+                        target_date.strftime("%Y-%m-%d"),
+                    ],
+                    cwd=root,
+                    env=env,
+                )
+                logger.info("Stage 3/3: Stock picking success. strategy=%s date=%s", strat, target_date)
+            except Exception as e:
+                logger.error("Stage 3/3: Stock picking failed. strategy=%s date=%s err=%s", strat, target_date, e)
+
+        logger.info("Daily pipeline completed. date=%s adjust=%s", target_date, adjust)
     finally:
         await release_advisory_lock(db, lock_key)
 
