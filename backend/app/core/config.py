@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     scheduler_run_on_start: bool = Field(default=False, description="worker 启动时立刻跑一次（用于验证/补数据）")
 
     # 策略列表：逗号分隔（或 JSON 数组），例如 HQ_STRATEGIES="b1,b2"
-    strategies: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["b1"])
+    strategies: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["b1,b2"])
 
     @field_validator("strategies", mode="before")
     @classmethod

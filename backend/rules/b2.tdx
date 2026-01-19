@@ -18,6 +18,7 @@ J1:=3*K1-2*D1;
 剔除创业板 := NOT(INBLOCK('创业板'));
 剔除科创 := NOT(INBLOCK('科创板'));
 剔除北证 := NOT(INBLOCK('北证A股'));
+剔除ST := NOT(NAMELIKE('ST') OR NAMELIKE('*ST') OR NAMELIKE('SST') OR NAMELIKE('S*ST'));
 
 选股条件:
 J1 <= 13 AND 
@@ -30,4 +31,5 @@ J <= 80 AND
 VOL >= REF(VOL, 1) AND
 剔除创业板 AND 
 剔除科创 AND 
-剔除北证;
+剔除北证 AND
+剔除ST;
