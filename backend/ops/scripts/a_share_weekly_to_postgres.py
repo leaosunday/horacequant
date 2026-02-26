@@ -329,7 +329,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--end-date", type=str, default=None, help="YYYYMMDD，默认：今天")
     p.add_argument("--adjust", type=str, default="qfq", help='复权类型：""|qfq|hfq（默认 qfq）')
     p.add_argument("--limit", type=int, default=0, help="仅处理前 N 只股票（调试用，0 表示全部）")
-    p.add_argument("--sleep", type=float, default=0.2, help="每只股票拉取后的休眠秒数")
+    p.add_argument("--sleep", type=float, default=0.0, help="每只股票拉取后的休眠秒数")
     return p.parse_args()
 
 

@@ -37,6 +37,7 @@ import akshare as ak
 import pandas as pd
 import psycopg2
 import psycopg2.extras
+import tushare as ts
 
 
 @dataclass(frozen=True)
@@ -276,12 +277,11 @@ def upsert_stock_basic(conn, stocks_df: pd.DataFrame) -> None:
     print(f"[OK] stock_basic 已写入/更新 {len(rows)} 条")
 
 
-def _normalize_daily_df(df: pd.DataFrame) -> pd.DataFrame:
+def _normalize_daily_df(df: pd.DataFrame, source: str = "akshare") -> pd.DataFrame:
     """
-    适配 ak.stock_zh_a_hist(period='daily') 常见返回列：
-      日期/开盘/收盘/最高/最低/成交量/成交额/振幅/涨跌幅/涨跌额/换手率
-    统一到：
-      trade_date/open/high/low/close/volume/amount/amplitude/pct_change/change_amount/turnover_rate
+    统一不同数据源的返回格式。
+    AkShare (stock_zh_a_hist) -> trade_date, open, high, low, close, volume, amount, ...
+    Tushare (pro_bar) -> trade_date, open, high, low, close, volume, amount, ...
     """
     if df is None or df.empty:
         return pd.DataFrame(
@@ -302,24 +302,52 @@ def _normalize_daily_df(df: pd.DataFrame) -> pd.DataFrame:
 
     d = df.copy()
 
-    mapping = {
-        "日期": "trade_date",
-        "开盘": "open",
-        "最高": "high",
-        "最低": "low",
-        "收盘": "close",
-        "成交量": "volume",
-        "成交额": "amount",
-        "振幅": "amplitude",
-        "涨跌幅": "pct_change",
-        "涨跌额": "change_amount",
-        "换手率": "turnover_rate",
-        # 少数数据源可能会给英文列
-        "date": "trade_date",
-    }
-    for k, v in mapping.items():
-        if k in d.columns:
-            d = d.rename(columns={k: v})
+    if source == "tushare":
+        # Tushare 列名映射
+        # ts_code, trade_date, open, high, low, close, pre_close, change, pct_chg, vol, amount
+        mapping = {
+            "trade_date": "trade_date",
+            "open": "open",
+            "high": "high",
+            "low": "low",
+            "close": "close",
+            "vol": "volume",
+            "amount": "amount",
+            "pct_chg": "pct_change",
+            "change": "change_amount",
+        }
+        for k, v in mapping.items():
+            if k in d.columns:
+                d = d.rename(columns={k: v})
+
+        # Tushare 转换：vol(手) -> 股, amount(千元) -> 元
+        if "volume" in d.columns:
+            d["volume"] = d["volume"] * 100
+        if "amount" in d.columns:
+            d["amount"] = d["amount"] * 1000
+        
+        # Tushare trade_date 是 YYYYMMDD 字符串
+        d["trade_date"] = pd.to_datetime(d["trade_date"]).dt.date
+    else:
+        # AkShare 列名映射
+        mapping = {
+            "日期": "trade_date",
+            "开盘": "open",
+            "最高": "high",
+            "最低": "low",
+            "收盘": "close",
+            "成交量": "volume",
+            "成交额": "amount",
+            "振幅": "amplitude",
+            "涨跌幅": "pct_change",
+            "涨跌额": "change_amount",
+            "换手率": "turnover_rate",
+            "date": "trade_date",
+        }
+        for k, v in mapping.items():
+            if k in d.columns:
+                d = d.rename(columns={k: v})
+        d["trade_date"] = pd.to_datetime(d["trade_date"]).dt.date
 
     keep = [
         c
@@ -339,29 +367,38 @@ def _normalize_daily_df(df: pd.DataFrame) -> pd.DataFrame:
         if c in d.columns
     ]
     d = d[keep].copy()
-    d["trade_date"] = pd.to_datetime(d["trade_date"]).dt.date
 
     for c in ["open", "high", "low", "close", "amount", "amplitude", "pct_change", "change_amount", "turnover_rate"]:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
     if "volume" in d.columns:
-        d["volume"] = pd.to_numeric(d["volume"], errors="coerce").astype("Int64")
+        d["volume"] = pd.to_numeric(d["volume"], errors="coerce").round().astype("Int64")
 
     return d
 
 
 def fetch_daily(code: str, exchange: str, start_date: str, end_date: str, adjust: str, retries: int = 3) -> pd.DataFrame:
-    # stock_zh_a_hist 使用 6 位数字代码（不带 sh/sz/bj 前缀）
+    # 优先使用 Tushare
+    ts_code = f"{code}.{exchange}"
+    # Tushare adjust: None -> None, qfq -> qfq, hfq -> hfq
+    ts_adj = adjust if adjust in ["qfq", "hfq"] else None
+    
     last_err: Optional[Exception] = None
     for i in range(retries):
         try:
+            # 使用 tushare.pro_bar
+            df = ts.pro_bar(ts_code=ts_code, asset='E', freq='D', start_date=start_date, end_date=end_date, adj=ts_adj)
+            if df is not None and not df.empty:
+                return _normalize_daily_df(df, source="tushare")
+            
+            # 如果 Tushare 返回空，可能是该股票在 Tushare 没权限或没数据，尝试 AkShare 兜底
             df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust=adjust)
-            return _normalize_daily_df(df)
+            return _normalize_daily_df(df, source="akshare")
         except Exception as e:
             last_err = e
             # 简单退避
             time.sleep(1.0 * (i + 1))
-    raise RuntimeError(f"拉取失败 {code}({exchange}) daily(hist): {last_err}")
+    raise RuntimeError(f"拉取失败 {code}({exchange}) daily: {last_err}")
 
 
 def upsert_stock_daily(conn, code: str, daily_df: pd.DataFrame, adjust: str) -> int:
@@ -427,7 +464,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--end-date", type=str, default=None, help="YYYYMMDD，默认：今天")
     p.add_argument("--adjust", type=str, default="", help='复权类型：""|qfq|hfq（默认不复权）')
     p.add_argument("--limit", type=int, default=0, help="仅处理前 N 只股票（调试用，0 表示全部）")
-    p.add_argument("--sleep", type=float, default=0.2, help="每只股票拉取后的休眠秒数")
+    p.add_argument("--sleep", type=float, default=0.0, help="每只股票拉取后的休眠秒数")
     p.add_argument("--disable-proxy", action="store_true", help="临时禁用 HTTP(S)_PROXY 等代理环境变量（某些网络会导致东财等源不可用）")
     p.add_argument(
         "--allow-small-universe",
@@ -460,6 +497,14 @@ def main() -> int:
     cfg = load_pg_config()
 
     maybe_disable_proxy(args.disable_proxy)
+
+    # 初始化 Tushare
+    ts_token = os.getenv("HQ_TUSHARE_TOKEN") or os.getenv("TUSHARE_TOKEN")
+    if ts_token:
+        ts.set_token(ts_token)
+        print("[INFO] 已初始化 Tushare token")
+    else:
+        print("[WARN] 未找到 Tushare token，将仅使用 AkShare")
 
     today = date.today()
     default_start = today - timedelta(days=365 * 2)

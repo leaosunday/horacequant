@@ -58,6 +58,7 @@ class PicksBundle(BaseModel):
     rule_name: str
     trade_date: str
     next_cursor: str
+    total: int = Field(default=0, description="选股结果总数")
     items: list[PickBundleItem]
 
 
@@ -153,10 +154,13 @@ async def get_picks_bundle(
     picks_repo = PicksRepo(db)
 
     try:
-        picks = await picks_repo.list_picks(rule_name=rule_name, trade_date=td, limit=limit, cursor_code=cursor)
+        picks_task = picks_repo.list_picks(rule_name=rule_name, trade_date=td, limit=limit, cursor_code=cursor)
+        count_task = picks_repo.count_picks(rule_name=rule_name, trade_date=td)
+        picks, total = await asyncio.gather(picks_task, count_task)
     except FileNotFoundError:
         # 该交易日还没跑出结果（或结果表未生成）：返回空列表，避免前端不停刷 404
         picks = []
+        total = 0
     next_cursor = picks[-1].code if picks else ""
 
     start = td - timedelta(days=window_days)
@@ -211,6 +215,7 @@ async def get_picks_bundle(
         rule_name=rule_name,
         trade_date=td.strftime("%Y-%m-%d"),
         next_cursor=next_cursor,
+        total=total,
         items=[PickBundleItem(**x) for x in items],
     )
     return ApiResponse[PicksBundle](request_id=getattr(request.state, "request_id", None), data=bundle)
@@ -241,9 +246,12 @@ async def get_picks_bundle_stream(
 
     picks_repo = PicksRepo(db)
     try:
-        picks = await picks_repo.list_picks(rule_name=rule_name, trade_date=td, limit=limit, cursor_code=cursor)
+        picks_task = picks_repo.list_picks(rule_name=rule_name, trade_date=td, limit=limit, cursor_code=cursor)
+        count_task = picks_repo.count_picks(rule_name=rule_name, trade_date=td)
+        picks, total = await asyncio.gather(picks_task, count_task)
     except FileNotFoundError:
         picks = []
+        total = 0
     next_cursor = picks[-1].code if picks else ""
 
     start = td - timedelta(days=window_days)
@@ -292,6 +300,7 @@ async def get_picks_bundle_stream(
             "rule_name": rule_name,
             "trade_date": td.strftime("%Y-%m-%d"),
             "next_cursor": next_cursor,
+            "total": total,
             "request_id": getattr(request.state, "request_id", None),
         }
         yield (json.dumps({"type": "meta", "data": header}, ensure_ascii=False) + "\n").encode("utf-8")

@@ -60,7 +60,7 @@ def create_app() -> FastAPI:
         # 初始化并确保缓存表存在
         mc_repo = MarketCapRepo(db)
         await mc_repo.ensure_schema()
-        app.state.market_cap = MarketCapService(repo=mc_repo)
+        app.state.market_cap = MarketCapService(repo=mc_repo, db=db)
 
         # 启动定时任务（生产环境建议单独跑 worker；这里先内置，便于开发/测试）
         app.state.scheduler = start_scheduler(db)

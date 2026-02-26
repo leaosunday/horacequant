@@ -112,7 +112,7 @@ async def run_daily_pipeline(db: Database, target_date: date, adjust: str = "qfq
         # 1) 日K：拉取最近两天（含当天），用于自动对齐可能遗漏的数据
         try:
             daily_script = broot / "ops" / "scripts" / "a_share_daily_to_postgres.py"
-            start_daily = (target_date - timedelta(days=1)).strftime("%Y%m%d")
+            start_daily = (target_date - timedelta(days=7)).strftime("%Y%m%d")
             await run_cmd(
                 [
                     py,
@@ -131,27 +131,27 @@ async def run_daily_pipeline(db: Database, target_date: date, adjust: str = "qfq
         except Exception as e:
             logger.error("Stage 1/3: Daily K-line sync failed. date=%s err=%s", target_date, e)
 
-        # 2) 周K：只需要覆盖近 30 天以包含当周
-        try:
-            weekly_script = broot / "ops" / "scripts" / "a_share_weekly_to_postgres.py"
-            start_weekly = (target_date - timedelta(days=30)).strftime("%Y%m%d")
-            await run_cmd(
-                [
-                    py,
-                    str(weekly_script),
-                    "--start-date",
-                    start_weekly,
-                    "--end-date",
-                    target_date.strftime("%Y%m%d"),
-                    "--adjust",
-                    adjust,
-                ],
-                cwd=root,
-                env=env,
-            )
-            logger.info("Stage 2/3: Weekly K-line sync success. date=%s", target_date)
-        except Exception as e:
-            logger.error("Stage 2/3: Weekly K-line sync failed. date=%s err=%s", target_date, e)
+        # # 2) 周K：只需要覆盖近 30 天以包含当周
+        # try:
+        #     weekly_script = broot / "ops" / "scripts" / "a_share_weekly_to_postgres.py"
+        #     start_weekly = (target_date - timedelta(days=30)).strftime("%Y%m%d")
+        #     await run_cmd(
+        #         [
+        #             py,
+        #             str(weekly_script),
+        #             "--start-date",
+        #             start_weekly,
+        #             "--end-date",
+        #             target_date.strftime("%Y%m%d"),
+        #             "--adjust",
+        #             adjust,
+        #         ],
+        #         cwd=root,
+        #         env=env,
+        #     )
+        #     logger.info("Stage 2/3: Weekly K-line sync success. date=%s", target_date)
+        # except Exception as e:
+        #     logger.error("Stage 2/3: Weekly K-line sync failed. date=%s err=%s", target_date, e)
 
         # 3) 选股：遍历策略列表
         picker_script = broot / "ops" / "scripts" / "stock_picker_tdx.py"

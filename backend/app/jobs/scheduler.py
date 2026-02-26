@@ -36,7 +36,7 @@ def start_scheduler(db: Database) -> AsyncIOScheduler:
 
     job = scheduler.add_job(
         job_runner,
-        CronTrigger(hour=getattr(settings, "scheduler_hour", 16), minute=getattr(settings, "scheduler_minute", 0)),
+        CronTrigger(hour=getattr(settings, "scheduler_hour", 18), minute=getattr(settings, "scheduler_minute", 0)),
         id="daily_pipeline",
         replace_existing=True,
         max_instances=1,
@@ -46,7 +46,7 @@ def start_scheduler(db: Database) -> AsyncIOScheduler:
     scheduler.start()
     logger.info(
         "Scheduler started: daily_pipeline at %02d:%02d %s next_run=%s",
-        getattr(settings, "scheduler_hour", 16),
+        getattr(settings, "scheduler_hour", 18),
         getattr(settings, "scheduler_minute", 0),
         getattr(settings, "scheduler_timezone", "Asia/Shanghai"),
         job.next_run_time,

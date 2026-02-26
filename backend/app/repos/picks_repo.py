@@ -69,3 +69,15 @@ class PicksRepo:
             )
         return out
 
+    async def count_picks(self, rule_name: str, trade_date: date) -> int:
+        table = self.table_name_for_date(trade_date)
+        t = f'public.{self.db.quote_ident(table)}'
+        query = f"SELECT count(*) FROM {t} WHERE rule_name = $1"
+        try:
+            val = await self.db.fetchval(query, rule_name)
+            return int(val) if val is not None else 0
+        except asyncpg.UndefinedTableError:
+            return 0
+        except Exception:
+            return 0
+

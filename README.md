@@ -196,7 +196,7 @@ python backend/ops/scripts/stock_picker_tdx.py --rule backend/rules/b1.tdx --rul
 
 ## 定时任务 Worker（每日流水线）
 
-Worker（`backend/worker.py`）内部使用 APScheduler，默认在 **Asia/Shanghai 16:00** 触发：
+Worker（`backend/worker.py`）内部使用 APScheduler，默认在 **Asia/Shanghai 18:00** 触发：
 
 1) 当日日 K 入库
 2) 周 K 更新（含“同周覆盖”）
@@ -233,7 +233,7 @@ Worker（`backend/worker.py`）内部使用 APScheduler，默认在 **Asia/Shang
 - **定时任务**
   - `HQ_SCHEDULER_ENABLED=true|false`
   - `HQ_SCHEDULER_TIMEZONE=Asia/Shanghai`
-  - `HQ_SCHEDULER_HOUR=16`
+  - `HQ_SCHEDULER_HOUR=18`
   - `HQ_SCHEDULER_MINUTE=0`
   - `HQ_SCHEDULER_LOCK_KEY=42424242`
   - `HQ_STRATEGIES=b1,b2`（策略列表，逗号分隔或 JSON 数组）

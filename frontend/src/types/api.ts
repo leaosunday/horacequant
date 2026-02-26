@@ -46,6 +46,7 @@ export interface PicksBundle {
   rule_name: string
   trade_date: string
   next_cursor: string
+  total: number
   items: PickBundleItem[]
 }
 
@@ -55,6 +56,7 @@ export interface StreamMeta {
     rule_name: string
     trade_date: string
     next_cursor: string
+    total: number
     request_id: string | null
   }
 }

@@ -5,6 +5,9 @@
       <div class="header-content">
         <h1 class="title">HoraceQuant</h1>
         <div class="controls">
+          <div v-if="items.length > 0" class="total-count">
+            共 {{ totalCount }} 只
+          </div>
           <div class="control-group">
             <label>选股规则</label>
             <input 
@@ -82,6 +85,7 @@ const tradeDate = ref(dayjs().format('YYYY-MM-DD'))
 
 const items = ref<PickBundleItem[]>([])
 const nextCursor = ref('')
+const totalCount = ref(0)
 const loading = ref(false)
 const hasMore = ref(true)
 
@@ -104,6 +108,7 @@ const loadData = async (cursor = '') => {
     for await (const message of stream) {
       if (message.type === 'meta') {
         nextCursor.value = message.data.next_cursor
+        totalCount.value = message.data.total
         hasMore.value = !!message.data.next_cursor
       } else if (message.type === 'item') {
         items.value.push(message.data)
@@ -236,6 +241,13 @@ onMounted(() => {
 
 .search-btn:active {
   transform: scale(0.98);
+}
+
+.total-count {
+  font-size: 14px;
+  color: #8a8a8a;
+  padding-bottom: 6px;
+  margin-left: 8px;
 }
 
 .loading-container {

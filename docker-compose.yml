@@ -16,9 +16,7 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: leaosunday/horacequant-backend:latest
     container_name: horacequant-backend
     environment:
       - TZ=Asia/Shanghai
@@ -31,6 +29,7 @@ services:
       - HQ_ALLOWED_HOSTS=*
       - HQ_CORS_ENABLED=true
       - HQ_LOG_DIR=/app/backend/logs
+      - HQ_TUSHARE_TOKEN=xxx
     volumes:
       - ./backend/logs:/app/backend/logs
     depends_on:
@@ -38,9 +37,7 @@ services:
         condition: service_healthy
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: leaosunday/horacemovie-frontend:latest
     container_name: horacequant-frontend
     environment:
       - TZ=Asia/Shanghai

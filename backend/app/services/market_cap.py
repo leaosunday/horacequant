@@ -57,6 +57,8 @@ class MarketCapService:
     """
 
     repo: MarketCapRepo
+    # 用于兜底逻辑获取交易所前缀
+    db: Database
     # 内存缓存 TTL（秒）：同一进程内短时间重复请求更快
     ttl_seconds: int = 600
     # DB 缓存有效期（天）：总市值日级更新足够（可按需调整）
@@ -66,6 +68,14 @@ class MarketCapService:
     def __post_init__(self):
         self._cache: dict[str, tuple[float, Optional[float]]] = {}
         self._sem = anyio.Semaphore(self.max_concurrency)
+
+    async def _get_exchange(self, code: str) -> Optional[str]:
+        """获取股票的交易所前缀 (SH/SZ/BJ)"""
+        try:
+            row = await self.db.fetchrow("SELECT exchange FROM stock_basic WHERE code = $1", code)
+            return str(row["exchange"]).strip().upper() if row else None
+        except Exception:
+            return None
 
     async def get_market_cap(self, code: str) -> Optional[float]:
         now = time.time()
@@ -84,6 +94,8 @@ class MarketCapService:
         except Exception:
             logger.exception("Failed to read market cap cache from DB, code=%s", code)
 
+        exchange = await self._get_exchange(code)
+
         async with self._sem:
             # double check
             cached = self._cache.get(code)
@@ -91,20 +103,34 @@ class MarketCapService:
                 return cached[1]
 
             def _fetch_sync() -> Optional[float]:
-                df = ak.stock_individual_info_em(symbol=code)
-                if df is None or df.empty:
-                    return None
-                # 常见列：item/value
-                if "item" in df.columns and "value" in df.columns:
-                    hit = df[df["item"] == "总市值"]
-                    if not hit.empty:
-                        return _parse_market_cap(hit["value"].iloc[0])
-                # 兼容其它列名
-                for c1, c2 in (("项目", "值"), ("item", "value")):
-                    if c1 in df.columns and c2 in df.columns:
-                        hit = df[df[c1] == "总市值"]
-                        if not hit.empty:
-                            return _parse_market_cap(hit[c2].iloc[0])
+                # 1. 尝试 stock_individual_info_em
+                try:
+                    df = ak.stock_individual_info_em(symbol=code)
+                    if df is not None and not df.empty:
+                        # 常见列：item/value
+                        for c1, c2 in (("item", "value"), ("项目", "值")):
+                            if c1 in df.columns and c2 in df.columns:
+                                hit = df[df[c1] == "总市值"]
+                                if not hit.empty:
+                                    val = _parse_market_cap(hit[c2].iloc[0])
+                                    if val:
+                                        return val
+                except Exception as e:
+                    logger.warning("stock_individual_info_em failed for %s: %s", code, e)
+
+                # 2. 兜底：尝试 stock_zh_scale_comparison_em
+                if exchange:
+                    try:
+                        symbol_with_prefix = f"{exchange}{code}"
+                        df_scale = ak.stock_zh_scale_comparison_em(symbol=symbol_with_prefix)
+                        if df_scale is not None and not df_scale.empty:
+                            if "总市值" in df_scale.columns:
+                                val = df_scale["总市值"].iloc[0]
+                                if val and float(val) > 0:
+                                    return float(val)
+                    except Exception as e:
+                        logger.warning("stock_zh_scale_comparison_em fallback failed for %s: %s", code, e)
+
                 return None
 
             try:
