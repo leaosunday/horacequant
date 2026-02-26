@@ -37,7 +37,7 @@ services:
         condition: service_healthy
 
   frontend:
-    image: leaosunday/horacemovie-frontend:latest
+    image: leaosunday/horacequant-frontend:latest
     container_name: horacequant-frontend
     environment:
       - TZ=Asia/Shanghai
