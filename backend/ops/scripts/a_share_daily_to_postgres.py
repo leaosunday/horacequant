@@ -19,7 +19,8 @@
   --end-date   YYYYMMDD   # 覆盖默认结束日期（默认今天）
   --adjust     qfq|hfq|""  # 复权类型（默认不复权）
   --limit      N          # 仅处理前 N 只股票（调试用）
-  --sleep      SECONDS    # 每只股票请求后的休眠（默认 0.2s，防止被限流）
+  --sleep      SECONDS    # 每只股票请求后的休眠（默认 0s）
+  --ts-rpm   N          # Tushare 每分钟调用次数限制（默认 50，设为 0 禁用限流）
 """
 
 from __future__ import annotations
@@ -28,7 +29,9 @@ import argparse
 import getpass
 import os
 import sys
+import threading
 import time
+import warnings
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional
@@ -38,6 +41,84 @@ import pandas as pd
 import psycopg2
 import psycopg2.extras
 import tushare as ts
+
+warnings.filterwarnings(
+    'ignore',
+    message=r"Series\.fillna with 'method' is deprecated and will raise in a future version\. Use obj\.ffill\(\) or obj\.bfill\(\) instead",
+    category=FutureWarning,
+    module='pandas'
+)
+
+
+class TushareRateLimiter:
+    """
+    令牌桶限流器，用于控制 Tushare pro_bar 调用频率。
+    Tushare 免费版限制：50 次/分钟 ≈ 0.83 秒/次
+    设置略保守：每 1.2 秒 1 次，留出缓冲空间。
+    """
+
+    def __init__(self, calls_per_minute: int = 50, burst: int = 10):
+        self.min_interval = 60.0 / calls_per_minute  # 最小间隔（秒）
+        self.burst = burst  # 突发调用次数（令牌桶容量）
+        self.tokens = float(burst)  # 当前令牌数
+        self.last_update = time.time()
+        self._lock = threading.Lock()
+
+    def acquire(self, timeout: Optional[float] = None) -> bool:
+        """
+        获取一个令牌，若令牌不足则阻塞等待。
+        timeout: 最长等待时间（秒），None 表示无限等待
+        返回：True 表示获取成功，False 表示超时
+        """
+        deadline = None if timeout is None else time.time() + timeout
+
+        while True:
+            with self._lock:
+                now = time.time()
+                # 补充令牌
+                elapsed = now - self.last_update
+                self.tokens = min(self.burst, self.tokens + elapsed / self.min_interval)
+                self.last_update = now
+
+                if self.tokens >= 1.0:
+                    self.tokens -= 1.0
+                    return True
+
+            # 令牌不足，等待
+            if deadline is not None and time.time() >= deadline:
+                return False
+
+            # 计算需要等待多久才能有 1 个令牌
+            with self._lock:
+                tokens_needed = 1.0 - self.tokens
+                wait_time = tokens_needed * self.min_interval
+
+            sleep_time = min(wait_time, 0.5) if wait_time > 0 else 0.01
+            time.sleep(sleep_time)
+
+    def try_acquire(self) -> bool:
+        """尝试立即获取一个令牌，不等待"""
+        with self._lock:
+            now = time.time()
+            elapsed = now - self.last_update
+            self.tokens = min(self.burst, self.tokens + elapsed / self.min_interval)
+            self.last_update = now
+
+            if self.tokens >= 1.0:
+                self.tokens -= 1.0
+                return True
+            return False
+
+
+# 全局限流器实例
+_tushare_limiter: Optional[TushareRateLimiter] = None
+
+
+def get_tushare_limiter() -> TushareRateLimiter:
+    global _tushare_limiter
+    if _tushare_limiter is None:
+        _tushare_limiter = TushareRateLimiter(calls_per_minute=50, burst=10)
+    return _tushare_limiter
 
 
 @dataclass(frozen=True)
@@ -325,7 +406,7 @@ def _normalize_daily_df(df: pd.DataFrame, source: str = "akshare") -> pd.DataFra
             d["volume"] = d["volume"] * 100
         if "amount" in d.columns:
             d["amount"] = d["amount"] * 1000
-        
+
         # Tushare trade_date 是 YYYYMMDD 字符串
         d["trade_date"] = pd.to_datetime(d["trade_date"]).dt.date
     else:
@@ -377,22 +458,31 @@ def _normalize_daily_df(df: pd.DataFrame, source: str = "akshare") -> pd.DataFra
     return d
 
 
-def fetch_daily(code: str, exchange: str, start_date: str, end_date: str, adjust: str, retries: int = 3) -> pd.DataFrame:
+def fetch_daily(code: str, exchange: str, start_date: str, end_date: str, adjust: str,
+                retries: int = 3) -> pd.DataFrame:
     # 优先使用 Tushare
     ts_code = f"{code}.{exchange}"
     # Tushare adjust: None -> None, qfq -> qfq, hfq -> hfq
     ts_adj = adjust if adjust in ["qfq", "hfq"] else None
-    
+
+    limiter = get_tushare_limiter()
     last_err: Optional[Exception] = None
+
     for i in range(retries):
         try:
+            # 限流：获取令牌（最多等待 60 秒）
+            if not limiter.acquire(timeout=60.0):
+                raise RuntimeError("Tushare 限流等待超时")
+
             # 使用 tushare.pro_bar
             df = ts.pro_bar(ts_code=ts_code, asset='E', freq='D', start_date=start_date, end_date=end_date, adj=ts_adj)
             if df is not None and not df.empty:
                 return _normalize_daily_df(df, source="tushare")
-            
+
             # 如果 Tushare 返回空，可能是该股票在 Tushare 没权限或没数据，尝试 AkShare 兜底
-            df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust=adjust)
+            # AkShare 不限流
+            df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date,
+                                    adjust=adjust)
             return _normalize_daily_df(df, source="akshare")
         except Exception as e:
             last_err = e
@@ -416,7 +506,8 @@ def upsert_stock_daily(conn, code: str, daily_df: pd.DataFrame, adjust: str) -> 
                 getattr(r, "high", None),
                 getattr(r, "low", None),
                 getattr(r, "close", None),
-                int(getattr(r, "volume")) if getattr(r, "volume", None) is not None and pd.notna(getattr(r, "volume")) else None,
+                int(getattr(r, "volume")) if getattr(r, "volume", None) is not None and pd.notna(
+                    getattr(r, "volume")) else None,
                 getattr(r, "amount", None),
                 getattr(r, "amplitude", None),
                 getattr(r, "pct_change", None),
@@ -465,7 +556,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--adjust", type=str, default="", help='复权类型：""|qfq|hfq（默认不复权）')
     p.add_argument("--limit", type=int, default=0, help="仅处理前 N 只股票（调试用，0 表示全部）")
     p.add_argument("--sleep", type=float, default=0.0, help="每只股票拉取后的休眠秒数")
-    p.add_argument("--disable-proxy", action="store_true", help="临时禁用 HTTP(S)_PROXY 等代理环境变量（某些网络会导致东财等源不可用）")
+    p.add_argument("--ts-rpm", type=int, default=50, help="Tushare 每分钟调用次数限制（默认 50，0 表示禁用限流）")
+    p.add_argument("--disable-proxy", action="store_true",
+                   help="临时禁用 HTTP(S)_PROXY 等代理环境变量（某些网络会导致东财等源不可用）")
     p.add_argument(
         "--allow-small-universe",
         action="store_true",
@@ -478,14 +571,14 @@ def maybe_disable_proxy(disable: bool) -> None:
     if not disable:
         return
     for k in (
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "NO_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-        "no_proxy",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
     ):
         os.environ.pop(k, None)
     os.environ["NO_PROXY"] = "*"
@@ -497,6 +590,12 @@ def main() -> int:
     cfg = load_pg_config()
 
     maybe_disable_proxy(args.disable_proxy)
+
+    # 初始化 Tushare 限流器
+    if args.ts_rpm > 0:
+        global _tushare_limiter
+        _tushare_limiter = TushareRateLimiter(calls_per_minute=args.ts_rpm, burst=min(10, args.ts_rpm))
+        print(f"[INFO] Tushare 限流已启用：{args.ts_rpm} 次/分钟")
 
     # 初始化 Tushare
     ts_token = os.getenv("HQ_TUSHARE_TOKEN") or os.getenv("TUSHARE_TOKEN")
@@ -539,7 +638,8 @@ def main() -> int:
             name = str(r.name)
 
             try:
-                df_daily = fetch_daily(code=code, exchange=exchange, start_date=start_date, end_date=end_date, adjust=adjust)
+                df_daily = fetch_daily(code=code, exchange=exchange, start_date=start_date, end_date=end_date,
+                                       adjust=adjust)
                 n = upsert_stock_daily(conn, code=code, daily_df=df_daily, adjust=adjust)
                 total_rows += n
                 ok += 1
@@ -560,4 +660,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

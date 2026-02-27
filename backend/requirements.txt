@@ -1,5 +1,5 @@
 akshare>=1.12.0
-pandas>=2.0.0
+pandas>=2.0.0,<3.0.0
 psycopg2-binary>=2.9.9
 fastapi>=0.110.0
 uvicorn[standard]>=0.24.0
